@@ -929,13 +929,14 @@ def modify_trade_to_breakeven(symbol, order_ticket, entry_price):
         else:
             print(f"❌ Failed to move SL: {result.comment} (Error Code: {result.retcode})")
 
-def close_pending(symbol,timeframe ):
+def close_pending(symbol):
     orders = mt5.orders_get(symbol=symbol)
     if orders is None or len(orders) == 0:
         return  # No active trades
 
     for order in orders:
         tp1= float(order.comment)
+        timeframe =order.magic
         price = mt5.symbol_info_tick(symbol).bid if order.type == mt5.ORDER_TYPE_SELL_LIMIT else mt5.symbol_info_tick(symbol).ask
         if (order.type == mt5.ORDER_TYPE_BUY_LIMIT and price >= tp1) or (order.type == mt5.ORDER_TYPE_SELL_LIMIT and price <= tp1):
             request = {
@@ -1741,7 +1742,7 @@ while True:
                     if positions is not None:
                         for position in positions:
                             check_tp1_and_manage_trades(symbol, position.comment, timeframe)
-                close_pending(symbol,timeframe)
+                close_pending(symbol)
  
         for symbol in TIMEFRAME_M15 :
                 timeframe = mt5.TIMEFRAME_M15
@@ -1821,7 +1822,7 @@ while True:
                     if positions is not None:
                         for position in positions:
                             check_tp1_and_manage_trades(symbol, position.comment,timeframe)
-                close_pending(symbol,timeframe)
+                close_pending(symbol)
 
         for symbol in TIMEFRAME_M5 :
                 timeframe = mt5.TIMEFRAME_M5
@@ -1902,7 +1903,7 @@ while True:
                     if positions is not None:
                         for position in positions:
                             check_tp1_and_manage_trades(symbol, position.comment, timeframe)
-                close_pending(symbol,timeframe)
+                close_pending(symbol)
   
 
         check_conflicting_slopes()
