@@ -1036,6 +1036,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                                 "price": current_price,
                                 "deviation": 10,
                                 "magic": magic,
+                                "comment": position.comment,
                                 "type_time": mt5.ORDER_TIME_GTC,
                                 "type_filling": mt5.ORDER_FILLING_FOK,
                             }
@@ -1258,7 +1259,7 @@ def handle_engulfing_patterns():
                                     "price": current_price,
                                     "deviation": 10,
                                     "magic": pos.magic,
-                                    "comment": "Engulf close",
+                                    "comment": pos.comment,
                                     "type_time": mt5.ORDER_TIME_GTC,
                                     "type_filling": mt5.ORDER_FILLING_FOK,
                                 }
@@ -1356,7 +1357,7 @@ def handle_engulfing_patterns():
                                 "price": current_price,
                                 "deviation": 10,
                                 "magic": pos.magic,
-                                "comment": "Engulf close",
+                                "comment": pos.comment,
                                 "type_time": mt5.ORDER_TIME_GTC,
                                 "type_filling": mt5.ORDER_FILLING_FOK,
                             }

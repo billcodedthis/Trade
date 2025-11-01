@@ -679,6 +679,7 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
     last_touch_price = channel_data["last_touch_price"]
     if last_touch_price is None:
         return None
+    
         
     entry_candle_idx = None
     count =0
@@ -699,6 +700,7 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
             if (symbol, timeframe) in levels:
                 del levels[(symbol,timeframe)]
             return None
+    
     
     if entry_candle_idx is None:
         return None
@@ -810,7 +812,8 @@ def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
             "direction": "BUY",
             "entry_time": df['time'].iloc[entry_idx],
             "engulf_count": 0,
-            "last_engulf_time": None 
+            "last_engulf_time": None ,
+            "entry": None
             
         }
     else:
@@ -823,7 +826,8 @@ def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
             "direction": "SELL",
             "entry_time": df['time'].iloc[entry_idx],
             "engulf_count": 0,
-            "last_engulf_time": None
+            "last_engulf_time": None,
+            "entry":None
         }
     
     return levels[(symbol,timeframe)]
@@ -864,6 +868,7 @@ def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
         print(f"Pending Trade placed: {direction} {symbol} @ {sniper}")
         levels[(symbol, timeframe)]['is_pending'] = True
         levels[(symbol, timeframe)]['pending_order_ticket'] = order.order
+        levels[(symbol, timeframe)]['entry'] = entry_price
     else:
         print(f"{symbol}, pending {direction}@{entry_price} sl:{sl},tp:{tp} failed: {order.comment}")
 
@@ -880,7 +885,7 @@ def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
     request = {
         "action": mt5.TRADE_ACTION_DEAL ,
         "symbol": symbol,
-        "volume": lot_size(symbol)  ,
+        "volume": lot_size(symbol) ,
         "type": mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL,
         "price": entry_price,
         "sl": sl1,
@@ -896,6 +901,7 @@ def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
         plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
         send_telegram_image(plot_filename,f"🚀 <b>Deriv Market Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {entry_price:.4f}\nSL: {sl1:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {tp:.4f}")
         print(f"Trade placed: {direction} {symbol} @ {entry_price}")
+        levels[(symbol, timeframe)]['entry'] = entry_price
     else:
         print(f"{symbol},{direction}@{entry_price} sl:{sl1},tp:{tp} failed: {order.comment}")
 
@@ -1028,7 +1034,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         if position.volume == get_min_lot_size(symbol):
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             continue
-                        if position.volume <= (lot_size(symbol) / 2):
+                        if position.volume <= (lot_size(symbol)/ 2):
                             print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
                             continue
                         if position.sl == position.price_open:
@@ -1044,6 +1050,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                                 "price": current_price,
                                 "deviation": 10,
                                 "magic": magic,
+                                "comment": position.comment,
                                 "type_time": mt5.ORDER_TIME_GTC,
                                 "type_filling": mt5.ORDER_FILLING_FOK,
                             }
@@ -1266,7 +1273,7 @@ def handle_engulfing_patterns():
                                     "price": current_price,
                                     "deviation": 10,
                                     "magic": pos.magic,
-                                    "comment": "Engulf close",
+                                    "comment": pos.comment,
                                     "type_time": mt5.ORDER_TIME_GTC,
                                     "type_filling": mt5.ORDER_FILLING_FOK,
                                 }
@@ -1364,7 +1371,7 @@ def handle_engulfing_patterns():
                                 "price": current_price,
                                 "deviation": 10,
                                 "magic": pos.magic,
-                                "comment": "Engulf close",
+                                "comment": pos.comment,
                                 "type_time": mt5.ORDER_TIME_GTC,
                                 "type_filling": mt5.ORDER_FILLING_FOK,
                             }
