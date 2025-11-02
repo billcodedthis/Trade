@@ -1517,7 +1517,7 @@ def check_extend_active_tp_from_higher_tf(symbol, direction, timeframe):
                     "sl": tp1_lower,
                     "tp": tp2_lower,  # Keep the extended TP
                     "symbol": symbol,
-                    "comment":tp1_lower,
+                    "comment":str(tp1_lower),
                     "type_time": mt5.ORDER_TIME_GTC,
                     "type_filling": mt5.ORDER_FILLING_FOK,
                 }
@@ -1557,7 +1557,7 @@ def check_extend_active_tp_from_higher_tf(symbol, direction, timeframe):
                 "sl": lower_info['sl'],
                 "tp": tp2_higher,
                 "symbol": symbol,
-                "comment":tp1_lower,
+                "comment":str(tp1_lower),
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_FOK,
             }
