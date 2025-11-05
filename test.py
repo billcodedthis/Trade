@@ -989,7 +989,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
         if tp1=='':
             return
         Tp1=float(tp1)
-        positions = mt5.positions_get(symbol=symbol)
+        positions = mt5.positions_get(symbol=symbol,magic=timeframe)
         if positions is not None:
             for position in positions:
                 if position.magic != timeframe:
