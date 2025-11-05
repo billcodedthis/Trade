@@ -380,7 +380,7 @@ def update_channel_data(symbol,timeframe):
         return True
     else:
         df = active_channels[(symbol,timeframe)]["df"]
-        last = df.iloc[-10:]
+        last = df.iloc[-num_bars:]
         upper = df['upper'].iloc[-1]       # Access upper line from DataFrame
         lower = df['lower'].iloc[-1]       # Access lower line from DataFrame
         last_trend = df['trend']     
@@ -390,22 +390,56 @@ def update_channel_data(symbol,timeframe):
             broke_above = candle['high'] > upper
             broke_below = candle['low'] < lower
 
-            # Breakout matches trend direction? Then delete
-            if symbol in H1_B+M15_B:
-                if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
-                        print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
-                        del active_channels[(symbol,timeframe)]
-                        break# Skip further processing this round
-            elif symbol in H1_BS+M15_BS:
-                if (trend_slope > 0  and broke_above) or (trend_slope < 0 and broke_below):
-                        print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
-                        del active_channels[(symbol,timeframe)]
-                        break# Skip further processing this round
-            elif symbol in H1_S+M15_S:
-                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
-                        print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
-                        del active_channels[(symbol,timeframe)]
-                        break# Skip further processing this round
+            if timeframe == mt5.TIMEFRAME_H1:
+                if symbol in H1_B:
+                    if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in H1_BS:
+                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in H1_S:
+                        if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+            
+            elif timeframe == mt5.TIMEFRAME_M15:
+                if symbol in M15_B:
+                    if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in M15_BS:
+                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in M15_S:
+                        if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+
+            elif timeframe == mt5.TIMEFRAME_M5:
+                if symbol in M5_B:
+                    if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in M5_BS:
+                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in M5_S:
+                        if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
 
     return True
 
@@ -679,6 +713,7 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
             entry_candle_idx = i-1
             break
         
+    
     if count >= channel_data["num_bars"] and entry_candle_idx is None:
             print(f"{symbol} {timeframe}channel has kept too long after breakout.Deleting channel")
             if (symbol, timeframe) in active_channels:
