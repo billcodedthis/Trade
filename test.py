@@ -61,6 +61,7 @@ levels={}
 old_engulfs={}
 breakeven_trades = {}
 active_trades={}
+cooldown = {} 
 
 DOWNLOADS_FOLDER = str(Path.home() / "OneDrive - University of Ghana")
 PLOTS_FOLDER = os.path.join(DOWNLOADS_FOLDER, "MT5_Regression_Channels_real_deriv_tt")
@@ -747,6 +748,8 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
 
 def detect_break(df, symbol,timeframe):
     channel_data = active_channels[(symbol,timeframe)]
+    if channel_data["breakout_idx"] is not None:
+        return
     data = channel_data["df"] 
     df['trend'] = data["trend"]
     df['upper'] = data["upper"]
@@ -756,7 +759,7 @@ def detect_break(df, symbol,timeframe):
     last_touch_found = False
     
     for i in range(1,len(df)):
-        if df['close'].iloc[i-1] <= df['upper'][i-1] and df['close'].iloc[i] > df['upper'][i-1]:
+        if df['close'].iloc[i-1] <= df['upper'][i-1] and df['close'].iloc[i] >= df['upper'][i-1]:
             if trend_slope < 0:
                 breakout = i
                 active_channels[(symbol,timeframe)]["breakout_idx"] = breakout
@@ -775,7 +778,7 @@ def detect_break(df, symbol,timeframe):
                                 break
                 break
 
-        elif df['close'].iloc[i-1] >= df['lower'][i-1] and df['close'].iloc[i] < df['lower'][i-1]:
+        elif df['close'].iloc[i-1] >= df['lower'][i-1] and df['close'].iloc[i] <= df['lower'][i-1]:
             if trend_slope > 0:
                 breakout = i
                 active_channels[(symbol,timeframe)]["breakout_idx"] = breakout
@@ -964,6 +967,7 @@ def close_pending(symbol):
     for order in orders:
         tp1= float(order.comment)
         timeframe =order.magic
+        direction = "SELL" if order.type == mt5.ORDER_TYPE_SELL_LIMIT else "BUY"
         price = mt5.symbol_info_tick(symbol).bid if order.type == mt5.ORDER_TYPE_SELL_LIMIT else mt5.symbol_info_tick(symbol).ask
         if (order.type == mt5.ORDER_TYPE_BUY_LIMIT and price >= tp1) or (order.type == mt5.ORDER_TYPE_SELL_LIMIT and price <= tp1):
             request = {
@@ -973,7 +977,7 @@ def close_pending(symbol):
             result = mt5.order_send(request)
                 
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                send_telegram_message(f"Delete deriv pending order for {symbol}.")
+                send_telegram_message(f"Delete deriv pending {direction} order for {symbol} on {timeframe_to_str(timeframe)}.")
                 print(f"✅ Deleted pending order {order.ticket} for {symbol}.")
                 if (symbol, timeframe) in active_channels:
                     del active_channels[(symbol,timeframe)]
@@ -1027,11 +1031,11 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         }
                         close_result = mt5.order_send(close_request)
                         if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} trade.✅")
+                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                             print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         elif close_result.comment == "Invalid volume":
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} trade.✅")
+                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                             print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         else:
@@ -1077,11 +1081,11 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                             }
                             close_result = mt5.order_send(close_request)
                             if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} trade.✅")
+                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                                 print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
                                 modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             elif close_result.comment == "Invalid volume":
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} trade.✅")
+                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                                 print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
                                 modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             else:
@@ -1099,49 +1103,76 @@ def del_completed():
             current_price = mt5.symbol_info_tick(symbol).bid if direction =="SELL" else mt5.symbol_info_tick(symbol).ask
                  # Use current market price
 
-            if timeframe== mt5.TIMEFRAME_M15:
-                if symbol in M15_pen :
+            if timeframe== mt5.TIMEFRAME_M5:
+                if symbol in M5_pen :
                     if (direction == "BUY" and current_price <= L["sl"]) or (direction == "SELL" and current_price >= L["sl"]):
+                        start_cooldown(symbol, timeframe)
                         # Hit SL - delete channel and levels
                         if (symbol, timeframe) in active_channels:
-                            send_telegram_message(f"🚨 {symbol} hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
                             del active_channels[(symbol,timeframe)]
                         if (symbol, timeframe) in levels:
                             del levels[(symbol,timeframe)]
-                        print(f"🚨 {symbol} hit SL - channel removed.")
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
+                        continue  # Skip TP check since we already hit SL
+                elif symbol in M5_pl:
+                    if (direction == "BUY" and current_price <= L["sl1"]) or (direction == "SELL" and current_price >= L["sl1"]):
+                        start_cooldown(symbol, timeframe)
+                        # Hit SL - delete channel and levels
+                        if (symbol, timeframe) in active_channels:
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            del active_channels[(symbol,timeframe)]
+                        if (symbol, timeframe) in levels:
+                            del levels[(symbol,timeframe)]
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
+                        continue  # Skip TP check since we already hit SL
+            
+            elif timeframe== mt5.TIMEFRAME_M15:
+                if symbol in M15_pen :
+                    if (direction == "BUY" and current_price <= L["sl"]) or (direction == "SELL" and current_price >= L["sl"]):
+                        start_cooldown(symbol, timeframe)
+                        # Hit SL - delete channel and levels
+                        if (symbol, timeframe) in active_channels:
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            del active_channels[(symbol,timeframe)]
+                        if (symbol, timeframe) in levels:
+                            del levels[(symbol,timeframe)]
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
                         continue  # Skip TP check since we already hit SL
                 elif symbol in M15_pl:
                     if (direction == "BUY" and current_price <= L["sl1"]) or (direction == "SELL" and current_price >= L["sl1"]):
+                        start_cooldown(symbol, timeframe)
                         # Hit SL - delete channel and levels
                         if (symbol, timeframe) in active_channels:
-                            send_telegram_message(f"🚨 {symbol} hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            send_telegram_message(f"🚨 {symbol}  {direction} hit Deriv SL on {timeframe_to_str(timeframe)}")
                             del active_channels[(symbol,timeframe)]
                         if (symbol, timeframe) in levels:
                             del levels[(symbol,timeframe)]
-                        print(f"🚨 {symbol} hit SL - channel removed.")
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
                         continue  # Skip TP check since we already hit SL
-
 
             elif timeframe== mt5.TIMEFRAME_H1:
                 if symbol in H1_pen :
                     if (direction == "BUY" and current_price <= L["sl"]) or (direction == "SELL" and current_price >= L["sl"]):
+                        start_cooldown(symbol, timeframe)
                         # Hit SL - delete channel and levels
                         if (symbol, timeframe) in active_channels:
-                            send_telegram_message(f"🚨 {symbol} hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            send_telegram_message(f"🚨 {symbol} {direction} hit Deriv SL on {timeframe_to_str(timeframe)}")
                             del active_channels[(symbol,timeframe)]
                         if (symbol, timeframe) in levels:
                             del levels[(symbol,timeframe)]
-                        print(f"🚨 {symbol} hit SL - channel removed.")
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
                         continue  # Skip TP check since we already hit SL
                 elif symbol in H1_pl:
                     if (direction == "BUY" and current_price <= L["sl1"]) or (direction == "SELL" and current_price >= L["sl1"]):
+                        start_cooldown(symbol, timeframe)
                         # Hit SL - delete channel and levels
                         if (symbol, timeframe) in active_channels:
-                            send_telegram_message(f"🚨 {symbol} hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            send_telegram_message(f"🚨 {symbol}  {direction} hit Deriv SL on {timeframe_to_str(timeframe)}")
                             del active_channels[(symbol,timeframe)]
                         if (symbol, timeframe) in levels:
                             del levels[(symbol,timeframe)]
-                        print(f"🚨 {symbol} hit SL - channel removed.")
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
                         continue  # Skip TP check since we already hit SL
 
             # Check TP2
@@ -1149,11 +1180,11 @@ def del_completed():
                 # Hit TP2 - delete channel and levels
                 if (symbol, timeframe) in active_channels:
                     plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
-                    send_telegram_image(plot_filename, f"✅ {symbol} hit Deriv TP2 on {timeframe_to_str(timeframe)}")
+                    send_telegram_image(plot_filename, f"✅ {symbol} {direction} hit Deriv TP2 on {timeframe_to_str(timeframe)}")
                     del active_channels[(symbol,timeframe)]
                 if (symbol, timeframe) in levels:
                     del levels[(symbol,timeframe)]
-                print(f"✅ {symbol} hit TP2 - channel removed.")  
+                print(f"✅ {symbol} {direction} hit TP2 - channel removed.")    
  
 
 def update_pending_order_status():
@@ -1615,6 +1646,8 @@ def monitor_breakeven_trades():
                 msg = "closed at breakeven"
             symbol = breakeven_trades[ticket]['symbol']
             timeframe = breakeven_trades[ticket]['timeframe']
+            if msg == "hit SL":
+                start_cooldown(symbol, timeframe)
             send_telegram_message(f"{symbol} {msg}")
             key = (symbol, timeframe)
             if key in levels:
@@ -1622,7 +1655,6 @@ def monitor_breakeven_trades():
             if key in active_channels:
                 del active_channels[key]
             del breakeven_trades[ticket]
-
 
 def monitor_active_trades():
     positions = mt5.positions_get() 
@@ -1645,6 +1677,8 @@ def monitor_active_trades():
                 msg = "hit SL"
             symbol = active_trades[ticket]['symbol']
             timeframe = active_trades[ticket]['timeframe']
+            if msg == "hit SL":
+                start_cooldown(symbol, timeframe)
             send_telegram_message(f"{symbol} {msg}" )
             key = (symbol, timeframe)
             if key in levels:
@@ -1652,6 +1686,23 @@ def monitor_active_trades():
             if key in active_channels:
                 del active_channels[key]
             del active_trades[ticket]
+
+def start_cooldown(symbol: str, timeframe: int):
+    """Block this symbol+tf for 1 hour after SL."""
+    end_time = datetime.now() + timedelta(hours=1)
+    cooldown[(symbol, timeframe)] = end_time
+    print(f"Cooldown started for {symbol} {timeframe_to_str(timeframe)} until {end_time.strftime('%H:%M:%S')}")
+
+def is_cooldown_active(symbol: str, timeframe: int) -> bool:
+    key = (symbol, timeframe)
+    if key not in cooldown:
+        return False
+    if datetime.now() >= cooldown[key]:
+        # time has elapsed → clean up
+        del cooldown[key]
+        print(f"Cooldown finished for {symbol} {timeframe_to_str(timeframe)}")
+        return False
+    return True
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -1696,6 +1747,8 @@ while True:
 
         for symbol in TIMEFRAME_H1 :
                 timeframe = mt5.TIMEFRAME_H1
+                if is_cooldown_active(symbol, timeframe):
+                    continue
                 if (symbol, timeframe) not in active_channels:
                     num_bars = [40,50,60,70,80,100]
                     for i in num_bars:
@@ -1777,6 +1830,8 @@ while True:
  
         for symbol in TIMEFRAME_M15 :
                 timeframe = mt5.TIMEFRAME_M15
+                if is_cooldown_active(symbol, timeframe):
+                    continue
                 if (symbol, timeframe) not in active_channels:
                     num_bars = [40,50,60,70,80]
                     for i in num_bars:
@@ -1858,6 +1913,8 @@ while True:
 
         for symbol in TIMEFRAME_M5 :
                 timeframe = mt5.TIMEFRAME_M5
+                if is_cooldown_active(symbol, timeframe):
+                    continue
                 if (symbol, timeframe) not in active_channels:
                     num_bars = [30,40,50,60,70,80]
                     for i in num_bars:
