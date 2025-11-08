@@ -773,7 +773,7 @@ def detect_break(df, symbol,timeframe):
     last_touch_found = False
     
     for i in range(1,len(df)):
-        if df['close'].iloc[i-1] <= df['upper'][i-1] and df['close'].iloc[i] >= df['upper'][i-1]:
+        if df['close'].iloc[i-1] <= df['upper'][i-1] and df['close'].iloc[i] > df['upper'][i]:
             if trend_slope < 0:
                 breakout = i
                 active_channels[(symbol,timeframe)]["breakout_idx"] = breakout
@@ -792,7 +792,7 @@ def detect_break(df, symbol,timeframe):
                                 break
                 break
 
-        elif df['close'].iloc[i-1] >= df['lower'][i-1] and df['close'].iloc[i] <= df['lower'][i-1]:
+        elif df['close'].iloc[i-1] >= df['lower'][i-1] and df['close'].iloc[i] < df['lower'][i]:
             if trend_slope > 0:
                 breakout = i
                 active_channels[(symbol,timeframe)]["breakout_idx"] = breakout
@@ -952,6 +952,9 @@ def modify_trade_to_breakeven(symbol, order_ticket, entry_price):
     if position.sl == entry_price:
         print(f"Breakeven already applied on {symbol}")
         return
+    if (position.type == mt5.ORDER_TYPE_BUY and position.sl > position.price_open) or \
+        (position.type == mt5.ORDER_TYPE_SELL and position.sl < position.price_open):
+            return
     request = {
         "action": mt5.TRADE_ACTION_SLTP,
         "position": order_ticket,
@@ -1025,6 +1028,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         continue
                     if position.volume <= (lot_size(symbol)/ 2):
                         print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
+                        modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         continue
                     if position.sl == position.price_open:
                         print(f"✅ Position {position.ticket} for {symbol} SL has already been modified")
@@ -1075,6 +1079,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                             continue
                         if position.volume <= (lot_size(symbol)/ 2):
                             print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
+                            modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             continue
                         if position.sl == position.price_open:
                             print(f"✅ Position {position.ticket} for {symbol} SL has already been modified")
@@ -1301,8 +1306,8 @@ def handle_engulfing_patterns():
                                 result = mt5.order_send(close_request)
                                 if result.retcode == mt5.TRADE_RETCODE_DONE:
                                     print(f"Closed half due to engulfing {symbol}")
-                                    send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol}")
-                                modify_trade_to_breakeven(symbol, pos.ticket, pos.price_open)
+                                    send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { L['direction']} on {timeframe_to_str(timeframe)}")
+                                    modify_trade_to_breakeven(symbol, pos.ticket, pos.price_open)
                             else:
                                 modify_trade_to_breakeven(symbol, pos.ticket, pos.price_open)
                         elif count >= 2 :
@@ -1326,7 +1331,7 @@ def handle_engulfing_patterns():
                                 result = mt5.order_send(close_request)
                                 if result.retcode == mt5.TRADE_RETCODE_DONE:
                                     print(f"Closed half due to engulfing {symbol}")
-                                    send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol}")
+                                    send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { L['direction']} on {timeframe_to_str(timeframe)}")
                             elif pos.volume == min_lot:
                                 current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
@@ -1346,7 +1351,7 @@ def handle_engulfing_patterns():
                                 result = mt5.order_send(close_request)
                                 if result.retcode == mt5.TRADE_RETCODE_DONE:
                                     print(f"Closed due to too many engulfing {symbol}")
-                                    send_telegram_message(f"Too many  engulfing, closed trade {symbol}")
+                                    send_telegram_message(f"Too many  engulfing, closed trade {symbol} { L['direction']} on {timeframe_to_str(timeframe)}")
                                 del levels[key]
                                 if key in active_channels: del active_channels[key]
 
@@ -1399,8 +1404,8 @@ def handle_engulfing_patterns():
                             result = mt5.order_send(close_request)
                             if result.retcode == mt5.TRADE_RETCODE_DONE:
                                 print(f"Closed half due to engulfing {symbol}")
-                                send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol}")
-                            modify_trade_to_breakeven(symbol, pos.ticket, pos.price_open)
+                                send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { direction} on {timeframe_to_str(timeframe)}")
+                                modify_trade_to_breakeven(symbol, pos.ticket, pos.price_open)
                         else:
                             modify_trade_to_breakeven(symbol, pos.ticket, pos.price_open)
                     elif count >= 2:
@@ -1424,7 +1429,7 @@ def handle_engulfing_patterns():
                             result = mt5.order_send(close_request)
                             if result.retcode == mt5.TRADE_RETCODE_DONE:
                                 print(f"Closed half due to engulfing {symbol}")
-                                send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol}")
+                                send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { direction} on {timeframe_to_str(timeframe)}")
                         elif pos.volume == min_lot:
                             current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
@@ -1444,7 +1449,7 @@ def handle_engulfing_patterns():
                             result = mt5.order_send(close_request)
                             if result.retcode == mt5.TRADE_RETCODE_DONE:
                                 print(f"Closed due to too many engulfing {symbol}")
-                                send_telegram_message(f"Too many  engulfing, closed trade {symbol}")
+                                send_telegram_message(f"Too many  engulfing, closed trade {symbol} { direction} on {timeframe_to_str(timeframe)}")
                             del old_engulfs[key]
                             if key in active_channels: del active_channels[key]
 
@@ -1594,8 +1599,8 @@ def check_extend_active_tp_from_higher_tf(symbol, direction, timeframe):
                 
                 result = mt5.order_send(request)
                 if result.retcode == mt5.TRADE_RETCODE_DONE:
-                    print(f"🛡️ Moved SL for {symbol} {timeframe_to_str(current_tf)} to higher TF TP1: {tp1_higher:.5f}")
-                    send_telegram_message(f"🛡️ Moved Deriv SL for {symbol} {timeframe_to_str(current_tf)} to higher TF TP1: {tp1_higher:.5f}")
+                    print(f"🛡️ Moved SL for {symbol} {timeframe_to_str(current_tf)} to TP1: {tp1_higher:.5f}")
+                    send_telegram_message(f"🛡️ Moved Deriv SL for {symbol} {timeframe_to_str(current_tf)} to TP1: {tp1_higher:.5f}")
                     modified = True
                 else:
                     print(f"❌ Failed to move SL for {symbol}: {result.comment}")
