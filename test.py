@@ -996,7 +996,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
         if tp1=='':
             return
         Tp1=float(tp1)
-        positions = mt5.positions_get(symbol=symbol,magic=timeframe)
+        positions = mt5.positions_get(symbol=symbol)
         if positions is not None:
             for position in positions:
                 if position.magic != timeframe:
@@ -1046,7 +1046,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                             print(f"❌ Failed to close half of  of {symbol}: {close_result.comment}")
 
     else:
-        positions = mt5.positions_get(symbol=symbol,magic=timeframe)
+        positions = mt5.positions_get(symbol=symbol)
         if positions is not None:
             for position in positions:
                 if position.magic != timeframe:
@@ -1827,9 +1827,11 @@ while True:
                     
                     check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
                 else:
-                    positions = mt5.positions_get(symbol=symbol,magic=timeframe)
+                    positions = mt5.positions_get(symbol=symbol)
                     if positions is not None:
                         for position in positions:
+                            if position.magic != timeframe:
+                                continue
                             check_tp1_and_manage_trades(symbol, position.comment, timeframe)
                 close_pending(symbol)
  
@@ -1910,10 +1912,12 @@ while True:
                     
                     check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
                 else:
-                    positions = mt5.positions_get(symbol=symbol,magic=timeframe)
+                    positions = mt5.positions_get(symbol=symbol)
                     if positions is not None:
                         for position in positions:
-                            check_tp1_and_manage_trades(symbol, position.comment,timeframe)
+                            if position.magic != timeframe:
+                                continue
+                            check_tp1_and_manage_trades(symbol, position.comment, timeframe)
                 close_pending(symbol)
 
         for symbol in TIMEFRAME_M5 :
@@ -1993,9 +1997,11 @@ while True:
                     
                     check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
                 else:
-                    positions = mt5.positions_get(symbol=symbol,magic=timeframe)
+                    positions = mt5.positions_get(symbol=symbol)
                     if positions is not None:
                         for position in positions:
+                            if position.magic != timeframe:
+                                continue
                             check_tp1_and_manage_trades(symbol, position.comment, timeframe)
                 close_pending(symbol)
   
