@@ -1827,7 +1827,7 @@ while True:
                     
                     check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
                 else:
-                    positions = mt5.positions_get(symbol=symbol)
+                    positions = mt5.positions_get(symbol=symbol,magic=timeframe)
                     if positions is not None:
                         for position in positions:
                             check_tp1_and_manage_trades(symbol, position.comment, timeframe)
@@ -1910,7 +1910,7 @@ while True:
                     
                     check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
                 else:
-                    positions = mt5.positions_get(symbol=symbol)
+                    positions = mt5.positions_get(symbol=symbol,magic=timeframe)
                     if positions is not None:
                         for position in positions:
                             check_tp1_and_manage_trades(symbol, position.comment,timeframe)
@@ -1993,7 +1993,7 @@ while True:
                     
                     check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
                 else:
-                    positions = mt5.positions_get(symbol=symbol)
+                    positions = mt5.positions_get(symbol=symbol,magic=timeframe)
                     if positions is not None:
                         for position in positions:
                             check_tp1_and_manage_trades(symbol, position.comment, timeframe)
