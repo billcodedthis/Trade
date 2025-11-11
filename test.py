@@ -20,16 +20,16 @@ else:
     print("✅ Successfully connected to MT5!")
 
 
-FOREX_PAIRS = ["CHFJPY.0","USDCHF.0"]
+FOREX_PAIRS = ["USDCHF.0"]
 XAUUSD = "XAUUSD.0"
 BTCUSD="BTCUSD.0"
-MAJORS = ["EURCHF.0","CHFJPY.0","USDCHF.0"]
+MAJORS = ["EURCHF.0","USDCHF.0"]
 V100 = "Volatility 100 Index.0"
 BnC = ["Boom 900 Index.0"]
 C=["Crash 900 Index.0"]
 Jump = ["Jump 25 Index.0"]
 J=["Jump 75 Index.0"]
-vol = ["Volatility 10 Index.0","Volatility 50 Index.0","Volatility 25 Index.0"]
+vol = ["Volatility 10 Index.0","Volatility 50 Index.0"]
 v=["Volatility 75 Index.0"]
 V1=["Volatility 50 Index.0"]
 SYNTHETICS = ["Step Index.0"]
@@ -42,11 +42,11 @@ H1_BS=[]
 H1_pen= Jump+[BTCUSD]+J 
 H1_pl= [XAUUSD]+US+SYNTHETICS+BnC
 
-TIMEFRAME_M15= FOREX_PAIRS+vol+[XAUUSD,V100]+Jump+J+v
-M15_B= [XAUUSD,V100]+FOREX_PAIRS+vol+v
+TIMEFRAME_M15= FOREX_PAIRS+vol+[XAUUSD]+Jump+J+v
+M15_B= [XAUUSD]+FOREX_PAIRS+vol+v
 M15_S=Jump+J
 M15_BS=[]
-M15_pen= Jump+FOREX_PAIRS+vol+[XAUUSD,V100]
+M15_pen= Jump+FOREX_PAIRS+vol+[XAUUSD]
 M15_pl= J+v
 
 TIMEFRAME_M5= MAJORS+[BTCUSD]+J+V1
@@ -748,8 +748,6 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
 
 def detect_break(df, symbol,timeframe):
     channel_data = active_channels[(symbol,timeframe)]
-    if channel_data["breakout_idx"] is not None:
-        return
     data = channel_data["df"] 
     df['trend'] = data["trend"]
     df['upper'] = data["upper"]
@@ -1653,7 +1651,7 @@ def monitor_breakeven_trades():
             timeframe = breakeven_trades[ticket]['timeframe']
             if msg == "hit SL":
                 start_cooldown(symbol, timeframe)
-            send_telegram_message(f"{symbol} {msg}")
+            send_telegram_message(f"{symbol}  on {timeframe_to_str(timeframe)}  {msg}")
             key = (symbol, timeframe)
             if key in levels:
                 del levels[key]
@@ -1684,7 +1682,7 @@ def monitor_active_trades():
             timeframe = active_trades[ticket]['timeframe']
             if msg == "hit SL":
                 start_cooldown(symbol, timeframe)
-            send_telegram_message(f"{symbol} {msg}" )
+            send_telegram_message(f"{symbol} on {timeframe_to_str(timeframe)}   {msg}" )
             key = (symbol, timeframe)
             if key in levels:
                 del levels[key]

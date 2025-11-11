@@ -40,19 +40,19 @@ XAUUSD = "XAUUSD"
 BTCUSD="BTCUSD"
 MAJORS = [ "EURCHF", "CADCHF","GBPCAD","USDCAD"]
 V100 = "Volatility 100 Index"
-BnC = ["Crash 300 Index"]
+BnC = ["Boom 900 Index","Boom 300 Index.0"]
 Jump = ["Jump 25 Index"]
 vol = ["Volatility 50 Index","Volatility 25 Index","Volatility 10 Index"]
 SYNTHETICS = ["Step Index"]
 US =["US Tech 100","Wall Street 30"]
 v=["Volatility 75 Index"]
 J=["Jump 75 Index"]
-C=["Crash 900 Index"]
+C=["Crash 900 Index","Crash 300 Index"]
 
 TIMEFRAME_H1 = BnC+MAJORS+[XAUUSD,BTCUSD]+US+SYNTHETICS+Jump+C+J
-H1_B= []
-H1_S=[]
-H1_BS=MAJORS+Jump+C+J+[XAUUSD,BTCUSD]+BnC+US+SYNTHETICS
+H1_B= BnC
+H1_S=C
+H1_BS=MAJORS+Jump+J+[XAUUSD,BTCUSD]+US+SYNTHETICS
 H1_pen= MAJORS+Jump+[BTCUSD]+J 
 H1_pl= [XAUUSD]+US+SYNTHETICS+C+BnC
 
@@ -64,8 +64,8 @@ M15_pen= Jump+FOREX_PAIRS+vol+[XAUUSD,V100]+SYNTHETICS+v
 M15_pl= J+US
 
 TIMEFRAME_M5= BnC+MAJORS+FOREX_PAIRS+vol+[XAUUSD,V100,BTCUSD]+SYNTHETICS+Jump+C+J+US
-M5_S=BnC+C
-M5_B= US+SYNTHETICS+MAJORS+FOREX_PAIRS+vol+[XAUUSD,V100,BTCUSD]
+M5_S=C
+M5_B= US+SYNTHETICS+MAJORS+FOREX_PAIRS+vol+[XAUUSD,V100,BTCUSD]+BnC
 M5_BS= Jump+J
 M5_pen= BnC+MAJORS+FOREX_PAIRS+vol+[XAUUSD,V100,BTCUSD]+SYNTHETICS+Jump+C+J+US
 M5_pl= []
@@ -762,8 +762,6 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
 
 def detect_break(df, symbol,timeframe):
     channel_data = active_channels[(symbol,timeframe)]
-    if channel_data["breakout_idx"] is not None:
-        return
     data = channel_data["df"] 
     df['trend'] = data["trend"]
     df['upper'] = data["upper"]
