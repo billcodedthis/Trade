@@ -1015,7 +1015,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                     continue
                 entry_price = position.price_open
                 current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
-                
+                direction = "SELL" if position.type == mt5.ORDER_TYPE_SELL else "BUY"
                 
 
                 # Original TP1 logic (half position & move SL to breakeven)
@@ -1047,11 +1047,11 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         }
                         close_result = mt5.order_send(close_request)
                         if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
+                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction}  positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                             print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         elif close_result.comment == "Invalid volume":
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
+                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction}  positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                             print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         else:
@@ -1066,6 +1066,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 entry_price = position.price_open
                 current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
                 magic =position.magic
+                direction = "SELL" if position.type == mt5.ORDER_TYPE_SELL else "BUY"
                 
 
                 # Original TP1 logic (half position & move SL to breakeven)
@@ -1098,11 +1099,11 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                             }
                             close_result = mt5.order_send(close_request)
                             if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
+                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction}  positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                                 print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
                                 modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             elif close_result.comment == "Invalid volume":
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
+                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction}  positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                                 print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
                                 modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             else:
@@ -1654,6 +1655,8 @@ def monitor_breakeven_trades():
             continue
         deals = mt5.history_deals_get(position=ticket)
         if deals:
+            first_deal = deals[0]
+            direction = "BUY" if first_deal.type == mt5.DEAL_TYPE_BUY else "SELL"
             total_profit = sum(d.profit for d in deals)
             if total_profit > 0:
                 msg = "hit TP"
@@ -1665,7 +1668,7 @@ def monitor_breakeven_trades():
             timeframe = breakeven_trades[ticket]['timeframe']
             if msg == "hit SL":
                 start_cooldown(symbol, timeframe)
-            send_telegram_message(f"{symbol}  on {timeframe_to_str(timeframe)}  {msg}")
+            send_telegram_message(f"{symbol} {direction} on {timeframe_to_str(timeframe)}  {msg}")
             key = (symbol, timeframe)
             if key in levels:
                 del levels[key]
@@ -1687,6 +1690,8 @@ def monitor_active_trades():
             continue
         deals = mt5.history_deals_get(position=ticket)
         if deals:
+            first_deal = deals[0]
+            direction = "BUY" if first_deal.type == mt5.DEAL_TYPE_BUY else "SELL"
             total_profit = sum(d.profit for d in deals)
             if total_profit > 0:
                 msg = "hit TP"
@@ -1696,7 +1701,7 @@ def monitor_active_trades():
             timeframe = active_trades[ticket]['timeframe']
             if msg == "hit SL":
                 start_cooldown(symbol, timeframe)
-            send_telegram_message(f"{symbol}  on {timeframe_to_str(timeframe)}  {msg}" )
+            send_telegram_message(f"{symbol} {direction} on {timeframe_to_str(timeframe)}  {msg}" )
             key = (symbol, timeframe)
             if key in levels:
                 del levels[key]
