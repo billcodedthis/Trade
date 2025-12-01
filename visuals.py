@@ -2128,7 +2128,7 @@ while True:
                         if candles.empty:
                             continue
                         channel  = detect_regression_channel(candles,symbol,timeframe)
-                        if channel is not None and channel[0] == True:
+                        if channel is not None and channel[0] == True and channel[2]==True:
                             # Save channel and breakout info
                             active_channels[(symbol,timeframe)] = {
                                     "df": channel[1].copy(),
@@ -2213,7 +2213,7 @@ while True:
                         if candles.empty:
                             continue
                         channel  = detect_regression_channel(candles,symbol,timeframe)
-                        if channel is not None and channel[0] == True:
+                        if channel is not None and channel[0] == True and channel[2]==True:
                             # Save channel and breakout info
                             active_channels[(symbol,timeframe)] = {
                                     "df": channel[1].copy(),
@@ -2298,7 +2298,7 @@ while True:
                         if candles.empty:
                             continue
                         channel  = detect_regression_channel(candles,symbol,timeframe)
-                        if channel is not None and channel[0] == True:
+                        if channel is not None and channel[0] == True and channel[2]==True:
                             # Save channel and breakout info
                             active_channels[(symbol,timeframe)] = {
                                     "df": channel[1].copy(),
