@@ -2057,6 +2057,7 @@ def should_reload_zones():
     Check if zones should be reloaded based on the 5-day schedule
     """
     global zone_last_loaded
+    global supply_demand_zones
     
     if zone_last_loaded is None:
         return True
@@ -2066,6 +2067,7 @@ def should_reload_zones():
     
     if days_since_last_load >= ZONE_RELOAD_DAYS:
         print(f"🔄 Zones reload required: {days_since_last_load} days since last load")
+        supply_demand_zones={}
         return True
     
     return False
