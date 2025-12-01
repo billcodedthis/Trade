@@ -536,127 +536,124 @@ def generate_comprehensive_report(df: pd.DataFrame):
                 print(f"   ⚠️  Consider tighter SL for large losses")
 
 def create_enhanced_visualizations(df: pd.DataFrame):
-    """Create comprehensive visualizations — NOW WITH DIRECTION IN MISSED OPPORTUNITIES"""
+    """PREMIUM VISUALIZATIONS v3 – Exactly what you want (Nov 2025 Edition)"""
     if df.empty:
         print("No data for visualizations")
         return
     
     viz_folder = os.path.join(OUTPUT_FOLDER, "visualizations")
     os.makedirs(viz_folder, exist_ok=True)
-    
-    # Separate data
+
+    # === PREMIUM DARK THEME ===
+    COLORS = {
+        'buy': '#00F2DE',      # Electric Cyan
+        'sell': '#FF3B5C',     # Vivid Coral
+        'bg': '#0D0D2B',       # Deep Space Blue
+        'text': '#FFFFFF',
+        'grid': '#1E1E3F'
+    }
+
+    plt.rcParams.update({
+        'figure.facecolor': COLORS['bg'],
+        'axes.facecolor': COLORS['bg'],
+        'axes.edgecolor': 'white',
+        'axes.labelcolor': 'white',
+        'axes.titlecolor': 'white',
+        'xtick.color': 'white',
+        'ytick.color': 'white',
+        'text.color': 'white',
+        'grid.color': COLORS['grid'],
+        'grid.alpha': 0.4,
+        'font.size': 11,
+        'font.family': 'Segoe UI',
+        'savefig.facecolor': COLORS['bg'],
+        'savefig.dpi': 320,
+        'savefig.bbox': 'tight'
+    })
+
     pending_orders = df[df['Trade Type'] == 'PENDING_ORDER']
     completed_trades = df[df['Trade Type'] == 'COMPLETED']
-    
-    # 1. MISSED OPPORTUNITIES CHART — NOW WITH DIRECTION (BUY/SELL)
-    if not pending_orders.empty:
-        missed_opps = pending_orders[pending_orders['Missed Opportunity'] == True]
-        if not missed_opps.empty:
-            # Group by Symbol + Timeframe + Direction
-            missed_by_group = missed_opps.groupby(['Symbol', 'Timeframe', 'Direction']).size().reset_index(name='Count')
-            missed_by_group = missed_by_group.sort_values('Count', ascending=False)
-            
-            # Create detailed label
-            missed_by_group['Label'] = (
-                missed_by_group['Symbol'] + ' | ' +
-                missed_by_group['Timeframe'] + ' | ' +
-                missed_by_group['Direction']
-            )
-            
-            plt.figure(figsize=(16, 9))
-            
-            # Color mapping: BUY = Green, SELL = Red
-            colors = ['#27ae60' if direction == 'BUY' else '#c0392b' for direction in missed_by_group['Direction']]
-            
-            bars = plt.bar(missed_by_group['Label'], missed_by_group['Count'], 
-                          color=colors, edgecolor='black', linewidth=1.2, alpha=0.9)
-            
-            plt.title('Missed Opportunities (TP1 Hit Before Entry)\nGrouped by Symbol • Timeframe • Direction', 
-                     fontsize=18, fontweight='bold', pad=20)
-            plt.ylabel('Number of Missed Trades', fontsize=14, fontweight='bold')
-            plt.xlabel('Symbol | Timeframe | Direction', fontsize=14, fontweight='bold')
-            plt.xticks(rotation=50, ha='right', fontsize=10)
-            plt.grid(axis='y', alpha=0.3, linestyle='--')
-            
-            # Add value labels on top of bars
-            for bar, count, direction in zip(bars, missed_by_group['Count'], missed_by_group['Direction']):
-                plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.15,
-                        f'{int(count)}', ha='center', va='bottom', fontweight='bold', fontsize=11)
-            
-            # Add legend
-            from matplotlib.patches import Patch
-            legend_elements = [
-                Patch(facecolor='#27ae60', edgecolor='black', label='BUY Signals Missed'),
-                Patch(facecolor='#c0392b', edgecolor='black', label='SELL Signals Missed')
-            ]
-            plt.legend(handles=legend_elements, loc='upper right', fontsize=12)
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(viz_folder, 'missed_opportunities_with_direction.png'), 
-                       dpi=300, bbox_inches='tight', facecolor='white')
-            plt.close()
-            
-            print(f"Created enhanced missed opportunities chart with DIRECTION: {len(missed_opps)} missed trades")
 
-    # 2. Performance by Symbol+Timeframe+Direction (unchanged — already includes direction)
+    # ================================================
+    # 1. MISSED OPPORTUNITIES – HORIZONTAL BAR (KEEP – IT'S GOLD)
+    # ================================================
+    if not pending_orders.empty:
+        missed = pending_orders[pending_orders['Missed Opportunity'] == True]
+        if not missed.empty:
+            top15 = (missed.groupby(['Symbol', 'Timeframe', 'Direction'])
+                    .size()
+                    .reset_index(name='Missed_Count')
+                    .sort_values('Missed_Count', ascending=True)
+                    .tail(15))
+
+            fig, ax = plt.subplots(figsize=(14, 10))
+            bars = ax.barh([f"{r.Symbol} • {r.Timeframe} • {r.Direction}" for _, r in top15.iterrows()],
+                          top15['Missed_Count'],
+                          color=[COLORS['buy'] if d == 'BUY' else COLORS['sell'] for d in top15['Direction']],
+                          edgecolor='white', linewidth=1.5, alpha=0.92)
+
+            ax.set_title('TOP 15 MISSED OPPORTUNITIES\n(TP1 Hit Before Entry)', 
+                        fontsize=24, fontweight='bold', pad=40)
+            ax.set_xlabel('Number of Times TP1 Was Hit Without Entry', fontsize=13, fontweight='bold')
+
+            for bar, count in zip(bars, top15['Missed_Count']):
+                ax.text(count + 0.3, bar.get_y() + bar.get_height()/2,
+                       f'{int(count)}', fontsize=13, va='center', fontweight='bold', color='white')
+
+            ax.invert_yaxis()
+            ax.grid(axis='x', alpha=0.5)
+            ax.spines[['top', 'right']].set_visible(False)
+
+            # Legend
+            from matplotlib.patches import Patch
+            ax.legend(handles=[
+                Patch(facecolor=COLORS['buy'], label='BUY Signals Missed'),
+                Patch(facecolor=COLORS['sell'], label='SELL Signals Missed')
+            ], loc='lower right', fontsize=12)
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(viz_folder, '01_Missed_Opportunities.png'))
+            plt.close()
+            print("Created: 01_Missed_Opportunities.png")
+
+    # ================================================
+    # 2. WIN RATE HEATMAP – NOW WITH DIRECTION (BUY/SELL SEPARATE)
+    # ================================================
     if not completed_trades.empty:
-        stfd_performance = completed_trades.groupby(['Symbol', 'Timeframe', 'Direction']).agg({
-            'Profit': ['count', 'sum', 'mean'],
-        }).round(2)
-        
-        if not stfd_performance.empty:
-            stfd_performance.columns = ['Trade_Count', 'Total_Profit', 'Avg_Profit']
-            
-            win_rates = completed_trades.groupby(['Symbol', 'Timeframe', 'Direction'])['Outcome'].apply(
-                lambda x: (x == 'WINNER').mean() * 100
-            ).round(1)
-            stfd_performance['Win_Rate_%'] = win_rates
-            stfd_performance = stfd_performance.sort_values('Total_Profit', ascending=False)
-            
-            top_combinations = stfd_performance.head(15)
-            
-            if not top_combinations.empty:
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 12))
-                fig.suptitle('TOP PERFORMING SYMBOL + TIMEFRAME + DIRECTION COMBINATIONS', 
-                            fontsize=18, fontweight='bold', y=0.96)
-                
-                labels = [f"{idx[0]}\n{idx[1]}\n{idx[2]}" for idx in top_combinations.index]
-                profit_colors = ['#2E8B57' if x > 0 else '#DC143C' for x in top_combinations['Total_Profit']]
-                
-                # Profit
-                bars1 = ax1.bar(range(len(top_combinations)), top_combinations['Total_Profit'], 
-                              color=profit_colors, alpha=0.85, edgecolor='black')
-                ax1.set_title('Total Profit ($)', fontsize=14, fontweight='bold')
-                ax1.set_ylabel('Profit ($)', fontweight='bold')
-                ax1.set_xticks(range(len(top_combinations)))
-                ax1.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
-                ax1.grid(axis='y', alpha=0.3)
-                
-                for bar, val in zip(bars1, top_combinations['Total_Profit']):
-                    ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + (8 if val > 0 else -20),
-                            f'${val:.0f}', ha='center', va='bottom' if val > 0 else 'top',
-                            fontweight='bold', color='black', fontsize=9)
-                
-                # Win Rate
-                bars2 = ax2.bar(range(len(top_combinations)), top_combinations['Win_Rate_%'], 
-                              color='#4682B4', alpha=0.8, edgecolor='black')
-                ax2.set_title('Win Rate (%)', fontsize=14, fontweight='bold')
-                ax2.set_ylabel('Win Rate (%)', fontweight='bold')
-                ax2.set_xlabel('Symbol • Timeframe • Direction', fontweight='bold')
-                ax2.set_xticks(range(len(top_combinations)))
-                ax2.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
-                ax2.set_ylim(0, 100)
-                ax2.grid(axis='y', alpha=0.3)
-                
-                for bar, wr in zip(bars2, top_combinations['Win_Rate_%']):
-                    ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2,
-                            f'{wr:.0f}%', ha='center', va='bottom', fontweight='bold', fontsize=10)
-                
-                plt.tight_layout(rect=[0, 0, 1, 0.94])
-                plt.savefig(os.path.join(viz_folder, 'performance_analysis.png'), 
-                           dpi=300, bbox_inches='tight', facecolor='white')
-                plt.close()
-                print("Created performance analysis chart")
+        # Create multi-index pivot: Symbol × Timeframe × Direction
+        heatmap_data = (completed_trades.groupby(['Symbol', 'Timeframe', 'Direction'])
+                       .agg(Win_Rate=('Outcome', lambda x: (x == 'WINNER').mean() * 100),
+                            Trades=('Outcome', 'count'))
+                       .round(1))
+
+        # Keep only combinations with at least 5 trades
+        heatmap_data = heatmap_data[heatmap_data['Trades'] >= 10]
+
+        if not heatmap_data.empty:
+            # Unstack Direction to create columns: BUY and SELL
+            pivot_wr = heatmap_data['Win_Rate'].unstack('Direction').fillna(0)
+
+            fig, ax = plt.subplots(figsize=(16, 12))
+            sns.heatmap(pivot_wr, annot=True, fmt=".0f", cmap="RdYlGn", center=60,
+                       linewidths=2, linecolor='white', cbar_kws={'label': 'Win Rate %'},
+                       annot_kws={'fontsize': 14, 'fontweight': 'bold'}, ax=ax, square=True)
+
+            ax.set_title('WIN RATE HEATMAP BY SYMBOL × TIMEFRAME DIRECTION\n(Min. 10 Trades Required)', 
+                        fontsize=26, fontweight='bold', pad=40)
+            ax.set_xlabel('Trade Direction', fontsize=16, fontweight='bold')
+            ax.set_ylabel('Symbol • Timeframe', fontsize=16, fontweight='bold')
+
+            # Color bar label
+            cbar = ax.collections[0].colorbar
+            cbar.ax.tick_params(labelsize=12)
+            cbar.set_label('Win Rate (%)', fontsize=14, fontweight='bold', color='white')
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(viz_folder, '02_WinRate_Heatmap_With_Direction.png'))
+            plt.close()
+            print("Created: 02_WinRate_Heatmap_With_Direction.png")
+
+    print(f"\nAll PREMIUM visuals saved (2 charts only – clean & focused):\n   {viz_folder}")    
 
 def save_comprehensive_excel_report(df: pd.DataFrame):
     """Save comprehensive analysis to Excel with formatting — NOW INCLUDES DIRECTION"""

@@ -70,6 +70,151 @@ PLOTS_FOLDER = os.path.join(DOWNLOADS_FOLDER, "MT5_Regression_Channels_real_deri
 if not os.path.exists(PLOTS_FOLDER):
     os.makedirs(PLOTS_FOLDER)
 
+supply_demand_zones = {}  # Store zones for each symbol
+zone_last_loaded = None   # Track when zones were last loaded
+ZONE_RELOAD_DAYS = 5   
+
+class SupplyDemandAnalyzer:
+    def __init__(self, data, lookback_period=20, min_touch_points=2):
+        self.data = data.copy()
+        self.lookback = lookback_period
+        self.min_touches = min_touch_points
+        
+    def find_swing_points(self):
+        data = self.data
+        
+        data['swing_high'] = np.nan
+        data['swing_low'] = np.nan
+        data['is_swing_high'] = False
+        data['is_swing_low'] = False
+        
+        for i in range(self.lookback, len(data) - self.lookback):
+            if (data['high'].iloc[i] == data['high'].iloc[i-self.lookback:i+self.lookback+1].max() and
+                data['high'].iloc[i] > data['high'].iloc[i-1] and
+                data['high'].iloc[i] > data['high'].iloc[i+1]):
+                data.loc[data.index[i], 'swing_high'] = data['high'].iloc[i]
+                data.loc[data.index[i], 'is_swing_high'] = True
+            
+            if (data['low'].iloc[i] == data['low'].iloc[i-self.lookback:i+self.lookback+1].min() and
+                data['low'].iloc[i] < data['low'].iloc[i-1] and
+                data['low'].iloc[i] < data['low'].iloc[i+1]):
+                data.loc[data.index[i], 'swing_low'] = data['low'].iloc[i]
+                data.loc[data.index[i], 'is_swing_low'] = True
+        
+        return data
+    
+    def identify_zones(self):
+        data = self.find_swing_points()
+        
+        supply_zones = []
+        demand_zones = []
+        
+        swing_highs = data[data['is_swing_high']].copy()
+        swing_lows = data[data['is_swing_low']].copy()
+        
+        for i in range(len(swing_highs)):
+            current_high = swing_highs.iloc[i]
+            zone_price = current_high['high']
+            
+            touches = self.count_touches(data, zone_price, zone_type='supply')
+            
+            if touches >= self.min_touches:
+                is_broken = self.is_zone_broken(data, zone_price, zone_type='supply')
+                
+                supply_zones.append({
+                    'price': zone_price,
+                    'date': current_high.name,
+                    'touches': touches,
+                    'strength': touches,
+                    'is_broken': is_broken
+                })
+        
+        for i in range(len(swing_lows)):
+            current_low = swing_lows.iloc[i]
+            zone_price = current_low['low']
+            
+            touches = self.count_touches(data, zone_price, zone_type='demand')
+            
+            if touches >= self.min_touches:
+                is_broken = self.is_zone_broken(data, zone_price, zone_type='demand')
+                
+                demand_zones.append({
+                    'price': zone_price,
+                    'date': current_low.name,
+                    'touches': touches,
+                    'strength': touches,
+                    'is_broken': is_broken
+                })
+        
+        return supply_zones, demand_zones
+    
+    def is_zone_broken(self, data, zone_price, zone_type, consecutive_candles=3, tolerance=0.001):
+        price_tolerance = zone_price * tolerance
+        
+        if zone_type == 'supply':
+            zone_formation_idx = data[data['is_swing_high'] & (abs(data['high'] - zone_price) <= price_tolerance)].index
+        else:
+            zone_formation_idx = data[data['is_swing_low'] & (abs(data['low'] - zone_price) <= price_tolerance)].index
+        
+        if len(zone_formation_idx) == 0:
+            return False
+            
+        zone_idx = data.index.get_loc(zone_formation_idx[-1])
+        subsequent_data = data.iloc[zone_idx+1:]
+        
+        if len(subsequent_data) < consecutive_candles:
+            return False
+        
+        consecutive_count = 0
+        max_consecutive = 0
+        
+        for i in range(len(subsequent_data)):
+            current_candle = subsequent_data.iloc[i]
+            
+            if zone_type == 'supply':
+                if current_candle['close'] > zone_price + price_tolerance:
+                    consecutive_count += 1
+                    max_consecutive = max(max_consecutive, consecutive_count)
+                else:
+                    if (current_candle['high'] >= zone_price - price_tolerance and 
+                        current_candle['low'] <= zone_price + price_tolerance):
+                        consecutive_count = 0
+                    else:
+                        consecutive_count = 0
+            else:
+                if current_candle['close'] < zone_price - price_tolerance:
+                    consecutive_count += 1
+                    max_consecutive = max(max_consecutive, consecutive_count)
+                else:
+                    if (current_candle['high'] >= zone_price - price_tolerance and 
+                        current_candle['low'] <= zone_price + price_tolerance):
+                        consecutive_count = 0
+                    else:
+                        consecutive_count = 0
+            
+            if consecutive_count >= consecutive_candles:
+                return True
+        
+        return False
+    
+    def count_touches(self, data, zone_price, zone_type, tolerance=0.001):
+        touches = 0
+        price_tolerance = zone_price * tolerance
+        
+        for i in range(len(data)):
+            if zone_type == 'supply':
+                if (abs(data['high'].iloc[i] - zone_price) <= price_tolerance or
+                    (data['high'].iloc[i] >= zone_price and 
+                     data['low'].iloc[i] <= zone_price)):
+                    touches += 1
+            else:
+                if (abs(data['low'].iloc[i] - zone_price) <= price_tolerance or
+                    (data['high'].iloc[i] >= zone_price and 
+                     data['low'].iloc[i] <= zone_price)):
+                    touches += 1
+        
+        return touches
+
 def is_connected():
     try:
         MT5_PATH = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
@@ -689,7 +834,13 @@ def detect_regression_channel(df,symbol,timeframe):
                 validated = True
                 
 
-    return validated, full_df
+    a_plus_setup = False
+    if validated:
+        # Calculate trend slope for A+ setup check
+        trend_slope = full_df['trend'].iloc[-1] - full_df['trend'].iloc[0]
+        a_plus_setup = check_a_plus_setup(symbol,full_df, trend_slope)
+
+    return validated, full_df, a_plus_setup 
 
 def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
     if last_touch_idx is None or breakout_idx is None:
@@ -1190,6 +1341,56 @@ def del_completed():
                     del levels[(symbol,timeframe)]
                 print(f"✅ {symbol} {direction} hit TP2 - channel removed.")    
  
+def check_conflicting_trades():
+    """Check for channels that conflict with existing trade directions and remove them"""
+    # Get all open positions
+    positions = mt5.positions_get()
+    if positions is None:
+        positions = []
+    
+    # Get all pending orders
+    orders = mt5.orders_get()
+    if orders is None:
+        orders = []
+    
+    # Combine positions and orders
+    all_trades = list(positions) + list(orders)
+    
+    for trade in all_trades:
+        symbol = trade.symbol
+        timeframe = trade.magic
+        
+        # Determine trade direction
+        if hasattr(trade, 'type'):  # Position
+            trade_direction = "BUY" if trade.type == mt5.ORDER_TYPE_BUY else "SELL"
+        else:  # Order
+            if trade.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP]:
+                trade_direction = "BUY"
+            elif trade.type in [mt5.ORDER_TYPE_SELL_LIMIT, mt5.ORDER_TYPE_SELL_STOP]:
+                trade_direction = "SELL"
+            else:
+                continue  # Skip other order types
+        
+        # Check all active channels for this symbol (across all timeframes)
+        for (channel_symbol, channel_timeframe) in list(active_channels.keys()):
+            if channel_symbol != symbol:
+                continue
+                
+            # Get channel direction from trend slope
+            channel_data = active_channels[(channel_symbol, channel_timeframe)]
+            df = channel_data["df"]
+            trend_slope = df['trend'].iloc[-1] - df['trend'].iloc[0]
+            channel_direction = "BUY" if trend_slope < 0 else "SELL"
+            
+            # If channel direction conflicts with existing trade direction, remove it
+            if channel_direction != trade_direction:
+                print(f"🗑️ Deleting {channel_symbol}_{timeframe_to_str(channel_timeframe)} - channel direction ({channel_direction}) conflicts with existing {trade_direction} trade on {timeframe_to_str(timeframe)}")
+                
+                # Remove from active_channels and levels
+                if (channel_symbol, channel_timeframe) in active_channels:
+                    del active_channels[(channel_symbol, channel_timeframe)]
+                if (channel_symbol, channel_timeframe) in levels:
+                    del levels[(channel_symbol, channel_timeframe)]
 
 def update_pending_order_status():
     for (symbol, timeframe) in list(levels.keys()):
@@ -1712,6 +1913,163 @@ def is_cooldown_active(symbol: str, timeframe: int) -> bool:
         return False
     return True
 
+def check_a_plus_setup(symbol,df, trend_slope):
+    """
+    Check if channel qualifies for A+ setup based on supply/demand zones
+    Returns True if A+ setup is detected, False otherwise
+    """
+    global supply_demand_zones
+    
+    # Get or calculate supply/demand zones for this symbol
+    if symbol not in supply_demand_zones:
+        supply_demand_zones[symbol] = {
+            'supply_zones': [],
+            'demand_zones': []
+        }
+        
+        # Define higher timeframes for zone detection
+        higher_timeframes = [mt5.TIMEFRAME_H4, mt5.TIMEFRAME_H1]
+        
+        for ht in higher_timeframes:
+            try:
+                # Fetch historical data from higher timeframe
+                historical_data = get_candles(symbol, ht, 200)  # More bars for better zone detection
+                if historical_data.empty:
+                    print(f"⚠️ No H1/H4 data for {symbol} on {timeframe_to_str(ht)}")
+                    continue
+                
+                # Analyze zones for this higher timeframe
+                analyzer = SupplyDemandAnalyzer(historical_data, lookback_period=15, min_touch_points=2)
+                ht_supply_zones, ht_demand_zones = analyzer.identify_zones()
+                
+                # Add zones from this timeframe to the combined list
+                supply_demand_zones[symbol]['supply_zones'].extend(ht_supply_zones)
+                supply_demand_zones[symbol]['demand_zones'].extend(ht_demand_zones)
+                
+                print(f"✅ Found {len(ht_supply_zones)} supply zones and {len(ht_demand_zones)} demand zones for {symbol} on {timeframe_to_str(ht)}")
+                
+            except Exception as e:
+                print(f"❌ Error analyzing {symbol} on {timeframe_to_str(ht)}: {str(e)}")
+                continue
+        
+    zones = supply_demand_zones[symbol]
+    # For downward channel (negative slope), check demand zones (support)
+    if trend_slope < 0:
+        for zone in zones['demand_zones']:
+            zone_price = zone['price']
+            # Check if any candle in the dataframe touches this demand zone
+            for i in range(len(df)):
+                candle_low = df['low'].iloc[i]
+                candle_high = df['high'].iloc[i]
+                
+                # Check if zone price falls within candle's range
+                if candle_low <= zone_price <= candle_high:
+                    print(f"✅ A+ Setup detected for {symbol}: Downward channel touches demand zone at {zone_price:.5f}")
+                    return True
+        
+        # Also check broken supply zones (now acting as support)
+        for zone in zones['supply_zones']:
+            if zone['is_broken']:
+                zone_price = zone['price']
+                for i in range(len(df)):
+                    candle_low = df['low'].iloc[i]
+                    candle_high = df['high'].iloc[i]
+                    
+                    if candle_low <= zone_price <= candle_high:
+                        print(f"✅ A+ Setup detected for {symbol}: Downward channel touches broken supply zone (now support) at {zone_price:.5f}")
+                        return True
+    
+    # For upward channel (positive slope), check supply zones (resistance)
+    elif trend_slope > 0:
+        for zone in zones['supply_zones']:
+            zone_price = zone['price']
+            # Check if any candle in the dataframe touches this supply zone
+            for i in range(len(df)):
+                candle_low = df['low'].iloc[i]
+                candle_high = df['high'].iloc[i]
+                
+                # Check if zone price falls within candle's range
+                if candle_low <= zone_price <= candle_high:
+                    print(f"✅ A+ Setup detected for {symbol}: Upward channel touches supply zone at {zone_price:.5f}")
+                    return True
+        
+        # Also check broken demand zones (now acting as resistance)
+        for zone in zones['demand_zones']:
+            if zone['is_broken']:
+                zone_price = zone['price']
+                for i in range(len(df)):
+                    candle_low = df['low'].iloc[i]
+                    candle_high = df['high'].iloc[i]
+                    
+                    if candle_low <= zone_price <= candle_high:
+                        print(f"✅ A+ Setup detected for {symbol}: Upward channel touches broken demand zone (now resistance) at {zone_price:.5f}")
+                        return True
+    
+    return False
+
+def preload_supply_demand_zones():
+    """
+    Preload supply/demand zones for all active symbols from H1 and H4 timeframes
+    """
+    global supply_demand_zones
+    
+    # Get all symbols from your configuration
+    all_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5)
+    
+    print("🔄 Preloading H1/H4 supply-demand zones for all symbols...")
+    
+    for symbol in all_symbols:
+        if symbol not in supply_demand_zones:
+            # Initialize empty zones for this symbol
+            supply_demand_zones[symbol] = {
+                'supply_zones': [],
+                'demand_zones': []
+            }
+            
+            # Define higher timeframes for zone detection
+            higher_timeframes = [mt5.TIMEFRAME_H4, mt5.TIMEFRAME_H1]
+            
+            for ht in higher_timeframes:
+                try:
+                    # Fetch historical data from higher timeframe
+                    historical_data = get_candles(symbol, ht, 200)
+                    if historical_data.empty:
+                        continue
+                    
+                    # Analyze zones for this higher timeframe
+                    analyzer = SupplyDemandAnalyzer(historical_data, lookback_period=15, min_touch_points=2)
+                    ht_supply_zones, ht_demand_zones = analyzer.identify_zones()
+                    
+                    # Add zones from this timeframe to the combined list
+                    supply_demand_zones[symbol]['supply_zones'].extend(ht_supply_zones)
+                    supply_demand_zones[symbol]['demand_zones'].extend(ht_demand_zones)
+                    
+                except Exception as e:
+                    print(f"❌ Error preloading zones for {symbol} on {timeframe_to_str(ht)}: {str(e)}")
+                    continue
+            print(f"✅ Preloaded zones for {symbol}: {len(supply_demand_zones[symbol]['supply_zones'])} supply, {len(supply_demand_zones[symbol]['demand_zones'])} demand zones")
+            zone_last_loaded = datetime.now()
+            print(f"📅 Zones preloaded at: {zone_last_loaded.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"🔄 Next zones reload in: {ZONE_RELOAD_DAYS} days")
+
+def should_reload_zones():
+    """
+    Check if zones should be reloaded based on the 5-day schedule
+    """
+    global zone_last_loaded
+    
+    if zone_last_loaded is None:
+        return True
+    
+    time_since_last_load = datetime.now() - zone_last_loaded
+    days_since_last_load = time_since_last_load.days
+    
+    if days_since_last_load >= ZONE_RELOAD_DAYS:
+        print(f"🔄 Zones reload required: {days_since_last_load} days since last load")
+        return True
+    
+    return False
+
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
@@ -1726,7 +2084,9 @@ while True:
             clear_plots_folder()
             mt5.shutdown()
             sys.exit("❌ Terminating script due to disconnection.")
-
+        if zone_last_loaded is None or should_reload_zones():
+            print("🔄 Initializing supply/demand zones...")
+            preload_supply_demand_zones()
         clean_manual_deleted()
         monitor_breakeven_trades()
         monitor_active_trades()
@@ -1773,7 +2133,8 @@ while True:
                                     "last_touch_price":None,
                                     "num_bars":i,
                                     "timeframe":timeframe,
-                                    "last_time" :channel[1]['time'].iloc[-2]
+                                    "last_time" :channel[1]['time'].iloc[-2],
+                                    "a_plus_setup": channel[2]  # Add the A+ setup flag
                             }
                             df = active_channels[(symbol,timeframe)]["df"]
                             last = df.iloc[-10:]
@@ -1858,7 +2219,8 @@ while True:
                                     "last_touch_price":None,
                                     "num_bars":i,
                                     "timeframe":timeframe,
-                                    "last_time" :channel[1]['time'].iloc[-2]
+                                    "last_time" :channel[1]['time'].iloc[-2],
+                                    "a_plus_setup": channel[2]  # Add the A+ setup flag
                             }
                             df = active_channels[(symbol,timeframe)]["df"]
                             last = df.iloc[-10:]
@@ -1943,7 +2305,8 @@ while True:
                                     "last_touch_price":None,
                                     "num_bars":i,
                                     "timeframe":timeframe,
-                                    "last_time" :channel[1]['time'].iloc[-2]
+                                    "last_time" :channel[1]['time'].iloc[-2],
+                                    "a_plus_setup": channel[2]  # Add the A+ setup flag
                             }
                             df = active_channels[(symbol,timeframe)]["df"]
                             last = df.iloc[-10:]
@@ -2010,7 +2373,7 @@ while True:
   
 
         check_conflicting_slopes()
-        
+        check_conflicting_trades()
 
         for (symbol,timeframe) in active_channels:
             active.append(f'{symbol}_{timeframe_to_str(timeframe)}')
