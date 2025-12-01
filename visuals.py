@@ -2080,6 +2080,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 clear_plots_folder()
 
 
+
 send_telegram_message("Deriv Bot running")
 while True:
     try:
