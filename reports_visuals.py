@@ -83,7 +83,7 @@ def get_trading_config():
     }
 
 def get_all_deals():
-    from_date = datetime(2025, 10, 1)
+    from_date = datetime(2025, 12, 1)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -102,7 +102,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2025, 10, 1)
+    from_date = datetime(2025, 12, 1)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:
@@ -134,9 +134,133 @@ def safe_float_conversion(value, default=0.0):
     except (ValueError, TypeError):
         return default
 
+def get_ticks_for_simulation(symbol, start_time, end_time, max_ticks=1000000):
+    """
+    Get tick data for simulation with proper error handling
+    Returns: DataFrame with columns ['time', 'bid', 'ask', 'last', 'volume', 'flags']
+    """
+    try:
+        # Convert datetime to timestamp
+        from_timestamp = int(start_time.timestamp())
+        to_timestamp = int(end_time.timestamp())
+        
+        # Get ticks
+        ticks = mt5.copy_ticks_range(symbol, from_timestamp, to_timestamp, mt5.COPY_TICKS_ALL)
+        
+        if ticks is None or len(ticks) == 0:
+            # Try with ticks info (last 1000 ticks as fallback)
+            ticks_info = mt5.symbol_info_tick(symbol)
+            if ticks_info is None:
+                print(f"⚠️ No tick data available for {symbol}")
+                return pd.DataFrame()
+            
+            # Create minimal tick data from current price
+            return pd.DataFrame([{
+                'time': start_time,
+                'bid': ticks_info.bid,
+                'ask': ticks_info.ask,
+                'last': ticks_info.last,
+                'volume': 0,
+                'flags': 0
+            }])
+        
+        # Convert to DataFrame
+        ticks_df = pd.DataFrame(ticks)
+        ticks_df['time'] = pd.to_datetime(ticks_df['time'], unit='s')
+        
+        # Limit number of ticks if too many
+        if len(ticks_df) > max_ticks:
+            print(f"📊 Downsampling {len(ticks_df)} ticks to {max_ticks} for {symbol}")
+            ticks_df = ticks_df.iloc[::len(ticks_df)//max_ticks + 1]
+        
+        return ticks_df
+        
+    except Exception as e:
+        print(f"⚠️ Error getting ticks for {symbol}: {e}")
+        return pd.DataFrame()
+
+def simulate_price_hits_with_ticks(symbol, direction, entry_price, tp1_price, sl_price, start_time, end_time):
+    """
+    Simulate price hits using tick-by-tick data for maximum accuracy
+    
+    Returns: tuple of (tp1_hit, sl_hit, entry_hit, tp1_time, sl_time, entry_time, first_touch_time)
+    """
+    # Get tick data
+    ticks_df = get_ticks_for_simulation(symbol, start_time, end_time)
+    
+    if ticks_df.empty:
+        print(f"⚠️ No tick data for {symbol} between {start_time} and {end_time}")
+        return False, False, False, None, None, None, None
+    
+    # Initialize tracking variables
+    tp1_hit = sl_hit = entry_hit = False
+    tp1_time = sl_time = entry_time = first_touch_time = None
+    
+    # For buy orders, we use ask price for entry check and bid price for TP/SL check
+    # For sell orders, we use bid price for entry check and ask price for TP/SL check
+    # In practice, we'll check both bid and ask for hits
+    
+    for _, tick in ticks_df.iterrows():
+        tick_time = tick['time']
+        bid = safe_float_conversion(tick.get('bid', 0))
+        ask = safe_float_conversion(tick.get('ask', 0))
+        
+        # If no bid/ask, use last price
+        if bid == 0 and ask == 0:
+            last_price = safe_float_conversion(tick.get('last', 0))
+            if last_price == 0:
+                continue
+            bid = ask = last_price
+        
+        # Check TP1 hit
+        if not tp1_hit:
+            if direction == "BUY" and bid >= tp1_price:
+                tp1_hit = True
+                tp1_time = tick_time
+            elif direction == "SELL" and ask <= tp1_price:
+                tp1_hit = True
+                tp1_time = tick_time
+        
+        # Check SL hit
+        if not sl_hit and sl_price > 0:
+            if direction == "BUY" and ask <= sl_price:
+                sl_hit = True
+                sl_time = tick_time
+            elif direction == "SELL" and bid >= sl_price:
+                sl_hit = True
+                sl_time = tick_time
+        
+        # Check Entry hit (for pending orders)
+        if not entry_hit:
+            if direction == "BUY" and ask <= entry_price:
+                entry_hit = True
+                entry_time = tick_time
+            elif direction == "SELL" and bid >= entry_price:
+                entry_hit = True
+                entry_time = tick_time
+        
+        # Track first touch of any level
+        if not first_touch_time:
+            touched = False
+            if direction == "BUY":
+                if bid >= tp1_price or ask <= sl_price or ask <= entry_price:
+                    touched = True
+            elif direction == "SELL":
+                if ask <= tp1_price or bid >= sl_price or bid >= entry_price:
+                    touched = True
+            
+            if touched:
+                first_touch_time = tick_time
+        
+        # Early exit if all levels hit
+        if tp1_hit and sl_hit and entry_hit:
+            break
+    
+    return tp1_hit, sl_hit, entry_hit, tp1_time, sl_time, entry_time, first_touch_time
+
 def analyze_pending_orders_enhanced():
-    """Enhanced pending order analysis with better edge case handling"""
-    print("🔍 Enhanced Pending Order Analysis...")
+    """Enhanced pending order analysis with TICK-BASED simulations"""
+    print("🔍 Enhanced Pending Order Analysis with TICK simulations...")
     orders_df = get_all_orders()
     if orders_df.empty:
         print("No historical orders found.")
@@ -149,6 +273,10 @@ def analyze_pending_orders_enhanced():
     records = []
     config = get_trading_config()
 
+    # Simple counter approach
+    total_orders = len(pending)
+    processed_count = 0
+    
     for _, order in pending.iterrows():
         symbol = order['symbol']
         magic = order['magic']
@@ -163,6 +291,7 @@ def analyze_pending_orders_enhanced():
         tp1 = extract_tp1_from_comment(comment)
 
         if tp1 is None or sl == 0.0 or entry == 0.0:
+            processed_count += 1
             continue
 
         start = order['time_setup']
@@ -183,108 +312,66 @@ def analyze_pending_orders_enhanced():
         else:
             # Still pending, analyze up to current time
             end = datetime.now()
+        
+        # Use tick-based simulation
+        tp1_hit, sl_hit, entry_hit, tp1_time, sl_time, entry_time, first_touch_time = \
+            simulate_price_hits_with_ticks(symbol, direction, entry, tp1, sl, start, end)
+        
+        # Enhanced outcome determination
+        missed_opportunity = tp1_hit and not entry_hit
+        won_trade = False
+        lost_trade = False
+        
+        if entry_hit:
+            if tp1_hit and (not sl_hit or (sl_time and tp1_time and tp1_time < sl_time)):
+                won_trade = True
+            elif sl_hit and (not tp1_hit or (tp1_time and sl_time and sl_time < tp1_time)):
+                lost_trade = True
 
-        # Get price data with validation
-        try:
-            rates = mt5.copy_rates_range(symbol, magic, start, end)
-            if rates is None or len(rates) == 0:
-                print(f"⚠️ No price data for {symbol} in range {start} to {end}")
-                continue
+        # Determine order type from config
+        order_type = "UNKNOWN"
+        if tf_str == "H1":
+            if symbol in config["H1_PENDING"]: order_type = "PENDING"
+            elif symbol in config["H1_INSTANT"]: order_type = "INSTANT"
+        elif tf_str == "M15":
+            if symbol in config["M15_PENDING"]: order_type = "PENDING"
+            elif symbol in config["M15_INSTANT"]: order_type = "INSTANT"
+        elif tf_str == "M5":
+            if symbol in config["M5_PENDING"]: order_type = "PENDING"
+            elif symbol in config["M5_INSTANT"]: order_type = "INSTANT"
 
-            df_rates = pd.DataFrame(rates)
-            df_rates['time'] = pd.to_datetime(df_rates['time'], unit='s')
-            
-            # Check if we have sufficient data
-            if len(df_rates) < 2:
-                print(f"⚠️ Insufficient price data for {symbol}")
-                continue
+        records.append({
+            "Symbol": symbol,
+            "Timeframe": tf_str,
+            "Direction": direction,
+            "Order Type": order_type,
+            "Setup Time": start,
+            "Entry Price": entry,
+            "TP1": tp1,
+            "SL": sl,
+            "TP2": tp2,
+            "TP1 Hit": tp1_hit,
+            "SL Hit": sl_hit,
+            "Entry Filled": entry_hit,
+            "Missed Opportunity": missed_opportunity,
+            "Won Trade": won_trade,
+            "Lost Trade": lost_trade,
+            "TP1 Time": tp1_time,
+            "SL Time": sl_time,
+            "Entry Time": entry_time,
+            "First Touch Time": first_touch_time,
+            "Analysis Period": f"{(end - start).days} days",
+            "Trade Type": "PENDING_ORDER",
+            "Simulation Method": "TICKS"
+        })
+        
+        processed_count += 1
+        
+        # Progress update - FIXED
+        if processed_count % 10 == 0:
+            print(f"  Processed {processed_count}/{total_orders} orders...")
 
-            # Track events with improved logic
-            tp1_hit = sl_hit = entry_hit = False
-            tp1_time = sl_time = entry_time = None
-            first_touch_time = None
-
-            for _, candle in df_rates.iterrows():
-                h = safe_float_conversion(candle['high'])
-                l = safe_float_conversion(candle['low'])
-                candle_time = candle['time']
-
-                # Track which level was hit first
-                if not first_touch_time:
-                    if ((direction == "BUY" and (h >= tp1 or l <= sl or l <= entry)) or 
-                        (direction == "SELL" and (l <= tp1 or h >= sl or h >= entry))):
-                        first_touch_time = candle_time
-
-                # TP1 check
-                if not tp1_hit:
-                    if (direction == "BUY" and h >= tp1) or (direction == "SELL" and l <= tp1):
-                        tp1_hit = True
-                        tp1_time = candle_time
-
-                # SL check
-                if not sl_hit and sl > 0:
-                    if (direction == "BUY" and l <= sl) or (direction == "SELL" and h >= sl):
-                        sl_hit = True
-                        sl_time = candle_time
-
-                # Entry check
-                if not entry_hit:
-                    if (direction == "BUY" and l <= entry) or (direction == "SELL" and h >= entry):
-                        entry_hit = True
-                        entry_time = candle_time
-
-            # Enhanced outcome determination
-            missed_opportunity = tp1_hit and not entry_hit
-            won_trade = False
-            lost_trade = False
-            
-            if entry_hit:
-                if tp1_hit and (not sl_hit or (sl_time and tp1_time and tp1_time < sl_time)):
-                    won_trade = True
-                elif sl_hit and (not tp1_hit or (tp1_time and sl_time and sl_time < tp1_time)):
-                    lost_trade = True
-
-            # Determine order type from config
-            order_type = "UNKNOWN"
-            if tf_str == "H1":
-                if symbol in config["H1_PENDING"]: order_type = "PENDING"
-                elif symbol in config["H1_INSTANT"]: order_type = "INSTANT"
-            elif tf_str == "M15":
-                if symbol in config["M15_PENDING"]: order_type = "PENDING"
-                elif symbol in config["M15_INSTANT"]: order_type = "INSTANT"
-            elif tf_str == "M5":
-                if symbol in config["M5_PENDING"]: order_type = "PENDING"
-                elif symbol in config["M5_INSTANT"]: order_type = "INSTANT"
-
-            records.append({
-                "Symbol": symbol,
-                "Timeframe": tf_str,
-                "Direction": direction,
-                "Order Type": order_type,
-                "Setup Time": start,
-                "Entry Price": entry,
-                "TP1": tp1,
-                "SL": sl,
-                "TP2": tp2,
-                "TP1 Hit": tp1_hit,
-                "SL Hit": sl_hit,
-                "Entry Filled": entry_hit,
-                "Missed Opportunity": missed_opportunity,
-                "Won Trade": won_trade,
-                "Lost Trade": lost_trade,
-                "TP1 Time": tp1_time,
-                "SL Time": sl_time,
-                "Entry Time": entry_time,
-                "First Touch Time": first_touch_time,
-                "Analysis Period": f"{(end - start).days} days",
-                "Trade Type": "PENDING_ORDER"
-            })
-            
-        except Exception as e:
-            print(f"⚠️ Error analyzing {symbol}: {e}")
-            continue
-
-    print(f"Enhanced pending order analysis complete: {len(records)} orders processed")
+    print(f"Enhanced tick-based pending order analysis complete: {len(records)} orders processed")
     return records
 
 def analyze_completed_trades():
@@ -369,20 +456,20 @@ def analyze_completed_trades():
             "TP": tp if tp != 0 else None,
             "TP1": tp1,
             "Volume": volume,
-            "Position ID": pos_id
+            "Position ID": pos_id,
+            "Simulation Method": "ACTUAL"  # Track that this is actual trade, not simulation
         })
 
     print(f"Completed trades analysis: {len(records)} trades processed")
     return records
 
 def analyze_strategy_performance():
-    """Comprehensive analysis combining pending orders and completed trades - FINAL FIX"""
+    """Comprehensive analysis combining pending orders and completed trades"""
     print("Running comprehensive strategy analysis...")
     
     pending_data = analyze_pending_orders_enhanced()
     completed_data = analyze_completed_trades()
     
-    # === THIS IS THE REAL FIX ===
     # Convert separately first so columns are preserved
     df_pending   = pd.DataFrame(pending_data)
     df_completed = pd.DataFrame(completed_data)
@@ -396,9 +483,8 @@ def analyze_strategy_performance():
     
     # Now safe concat
     df = pd.concat([df_pending, df_completed], ignore_index=True)
-    # ==================================
     
-    # Type fixing (same as before)
+    # Type fixing
     numeric_columns = ['Entry Price', 'TP1', 'SL', 'TP2', 'Profit', 'Volume', 'TP']
     for col in numeric_columns:
         if col in df.columns:

@@ -1118,11 +1118,36 @@ def close_pending(symbol):
         return  # No active trades
 
     for order in orders:
-        tp1= float(order.comment)
-        timeframe =order.magic
-        direction = "SELL" if order.type == mt5.ORDER_TYPE_SELL_LIMIT else "BUY"
-        price = mt5.symbol_info_tick(symbol).bid if order.type == mt5.ORDER_TYPE_SELL_LIMIT else mt5.symbol_info_tick(symbol).ask
-        if (order.type == mt5.ORDER_TYPE_BUY_LIMIT and price >= tp1) or (order.type == mt5.ORDER_TYPE_SELL_LIMIT and price <= tp1):
+        timeframe = order.magic
+        key = (symbol, timeframe)
+        if key in levels and levels[key].get('is_pending', False):
+            L = levels[key]  # ← Define L here!
+            tp1 = L["tp1"]   # ← Use the stored TP1 from levels, NOT order.comment
+            direction = L["direction"]
+            entry_time = L["entry_time"]  # This is the breakout candle time — CORRECT reference!
+        else:
+            # For old orders not in levels
+            try:
+                tp1 = float(order.comment)
+            except ValueError:
+                continue  # Skip if comment isn't a valid float
+            direction = "SELL" if order.type == mt5.ORDER_TYPE_SELL_LIMIT else "BUY"
+            entry_time = pd.to_datetime(order.time_setup, unit='s')  # Fixed: Use order setup time
+
+        # Fetch candles since the SIGNAL (breakout), not since order placement
+        rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
+        if rates is None or len(rates) == 0:
+            continue
+        recent_candles = pd.DataFrame(rates)
+        recent_candles['time'] = pd.to_datetime(recent_candles['time'], unit='s')
+        crossed_tp1 = False
+        if direction == "BUY":
+            if (recent_candles['high'] >= tp1).any():
+                crossed_tp1 = True
+        elif direction == "SELL":
+            if (recent_candles['low'] <= tp1).any():
+                crossed_tp1 = True
+        if crossed_tp1:
             request = {
                     "action": mt5.TRADE_ACTION_REMOVE,
                     "order": order.ticket,
@@ -1140,7 +1165,7 @@ def close_pending(symbol):
                 print(f"❌ Failed to delete order {order.ticket} for {symbol}: {result.comment}")
         else:
             print(f"Order still valid for {symbol} ")
-
+            
 def check_tp1_and_manage_trades(symbol, tp1,timeframe):
     if isinstance(tp1,str):
         if tp1=='':
