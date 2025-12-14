@@ -397,7 +397,7 @@ def plot_active_channels():
 
                 # In the plot_active_channels function, update this section:
                 channel_text = f"Channel Bars: {original_length}\n"
-                channel_text += f"Extended Bars: {len(df_plot) - original_length}"  # Calculate extended bars
+                channel_text += f"Extended Bars: {len(df_plot) - original_length}\n"  # Calculate extended bars
                 channel_text += f"A+ Setup: {'True' if channel_data.get('a_plus_setup', False) else 'False'}"
                 axes[0].text(
                     0.90, 0.98, channel_text,
