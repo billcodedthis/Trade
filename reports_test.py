@@ -60,7 +60,7 @@ TIMEFRAMES = {
 
 # Trading configuration from visuals.py
 def get_trading_config():
-    FOREX_PAIRS = ["USDCHF.0"]
+    FOREX_PAIRS = []
     XAUUSD = "XAUUSD.0"
     BTCUSD="BTCUSD.0"
     MAJORS = ["EURCHF.0","USDCHF.0"]
@@ -74,17 +74,21 @@ def get_trading_config():
     V1=["Volatility 50 Index.0"]
     SYNTHETICS = ["Step Index.0"]
     US =["US Tech 100.0","Wall Street 30.0"]
+    BM5P =["Boom 300 Index.0","Volatility 10 Index.0","Volatility 100 Index.0","US Tech 100.0"]
+    BM15P =["Volatility 10 Index.0","GBPUSD.0"]
+    SM15P =["Step Index.0","Jump 25 Index.0","Volatility 100 Index.0"]
+    BH1P=["EURCHF.0"]
     return {
-        "H1_PENDING": Jump+[BTCUSD]+J ,
-        "H1_INSTANT": [XAUUSD]+US+SYNTHETICS+BnC,
-        "M15_PENDING": Jump+FOREX_PAIRS+vol+[XAUUSD],
-        "M15_INSTANT": J+v,
-        "M5_PENDING": [BTCUSD]+V1,
-        "M5_INSTANT": MAJORS+J
+        "H1_PENDING": Jump+J+BH1P ,
+        "H1_INSTANT": [XAUUSD]+US+BnC,
+        "M15_PENDING": Jump+vol+[XAUUSD]+v+BM15P+SM15P,
+        "M15_INSTANT": J,
+        "M5_PENDING": [BTCUSD]+BM5P,
+        "M5_INSTANT": MAJORS+J+V1
     }
 
 def get_all_deals():
-    from_date = datetime(2025, 12, 1)
+    from_date = datetime(2026, 1, 5)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -103,7 +107,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2025, 12, 1)
+    from_date = datetime(2026, 1, 5)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:
@@ -500,7 +504,7 @@ def analyze_strategy_performance():
     return df
 
 def generate_comprehensive_report(df: pd.DataFrame):
-    """Generate comprehensive analysis report"""
+    """Generate comprehensive analysis report and save to TXT file"""
     if df.empty:
         print("No data for report generation")
         return
@@ -513,12 +517,22 @@ def generate_comprehensive_report(df: pd.DataFrame):
     print("🎯 COMPREHENSIVE TRADING BOT ANALYSIS REPORT")
     print(f"{'='*80}")
     
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    report_lines = []
+    report_lines.append("="*80)
+    report_lines.append("🎯 COMPREHENSIVE TRADING BOT ANALYSIS REPORT")
+    report_lines.append(f"Generated on: {timestamp}")
+    report_lines.append("="*80)
+    report_lines.append("")
+    
     # 1. PENDING ORDER ANALYSIS
     if not pending_orders.empty:
         print(f"\n📊 PENDING ORDER ANALYSIS ({len(pending_orders)} orders)")
         print(f"{'-'*60}")
         
-        # Missed opportunities analysis
+        report_lines.append(f"📊 PENDING ORDER ANALYSIS ({len(pending_orders)} orders)")
+        report_lines.append("-"*60)
+        
         missed_opps = pending_orders[pending_orders['Missed Opportunity'] == True]
         missed_by_symbol_tf = missed_opps.groupby(['Symbol', 'Timeframe']).size().reset_index(name='Missed Count')
         missed_by_symbol_tf = missed_by_symbol_tf.sort_values('Missed Count', ascending=False)
@@ -529,15 +543,10 @@ def generate_comprehensive_report(df: pd.DataFrame):
             for _, row in missed_by_symbol_tf.head(10).iterrows():
                 print(f"   {row['Symbol']} - {row['Timeframe']}: {row['Missed Count']} missed")
         
-        # Execution rate by symbol+timeframe - FIXED VERSION
         exec_stats = pending_orders.groupby(['Symbol', 'Timeframe']).agg({
             'Entry Filled': ['count', 'sum']
         }).reset_index()
-        
-        # Flatten column names
         exec_stats.columns = ['Symbol', 'Timeframe', 'Total_Orders', 'Executed_Orders']
-        
-        # Convert to numeric and calculate execution rate
         exec_stats['Total_Orders'] = pd.to_numeric(exec_stats['Total_Orders'], errors='coerce')
         exec_stats['Executed_Orders'] = pd.to_numeric(exec_stats['Executed_Orders'], errors='coerce')
         exec_stats['Execution_Rate_%'] = (exec_stats['Executed_Orders'] / exec_stats['Total_Orders'] * 100).round(1)
@@ -546,13 +555,25 @@ def generate_comprehensive_report(df: pd.DataFrame):
         print(f"\n📉 Lowest Execution Rates:")
         for _, row in exec_stats.head(5).iterrows():
             print(f"   {row['Symbol']} - {row['Timeframe']}: {row['Execution_Rate_%']}% ({row['Executed_Orders']:.0f}/{row['Total_Orders']:.0f})")
+        
+        # Add to report_lines
+        report_lines.append(f"📈 Missed Opportunities (TP1 hit but no entry): {len(missed_opps)}")
+        if not missed_opps.empty:
+            report_lines.append("")
+            report_lines.append("Top missed opportunities:")
+            for _, row in missed_by_symbol_tf.head(10).iterrows():
+                report_lines.append(f"   {row['Symbol']} - {row['Timeframe']}: {row['Missed Count']} missed")
+        
+        report_lines.append("")
+        report_lines.append("📉 Lowest Execution Rates:")
+        for _, row in exec_stats.head(5).iterrows():
+            report_lines.append(f"   {row['Symbol']} - {row['Timeframe']}: {row['Execution_Rate_%']}% ({row['Executed_Orders']:.0f}/{row['Total_Orders']:.0f})")
     
     # 2. COMPLETED TRADES ANALYSIS
     if not completed_trades.empty:
         print(f"\n💰 COMPLETED TRADES ANALYSIS ({len(completed_trades)} trades)")
         print(f"{'-'*60}")
         
-        # Basic stats with safe numeric conversion
         total_profit = pd.to_numeric(completed_trades['Profit'], errors='coerce').sum()
         win_rate = (completed_trades['Outcome'] == 'WINNER').mean() * 100
         avg_profit = pd.to_numeric(completed_trades['Profit'], errors='coerce').mean()
@@ -561,21 +582,15 @@ def generate_comprehensive_report(df: pd.DataFrame):
         print(f"Win Rate: {win_rate:.1f}%")
         print(f"Average Profit per Trade: ${avg_profit:.2f}")
         
-        # Performance by Symbol+Timeframe+Direction
         stfd_performance = completed_trades.groupby(['Symbol', 'Timeframe', 'Direction']).agg({
             'Profit': ['count', 'sum', 'mean'],
         }).round(2)
         
         if not stfd_performance.empty:
-            # Flatten column names
             stfd_performance.columns = ['Trade_Count', 'Total_Profit', 'Avg_Profit']
-            
-            # Calculate win rate separately
             win_rates = completed_trades.groupby(['Symbol', 'Timeframe', 'Direction'])['Outcome'].apply(
                 lambda x: (x == 'WINNER').mean() * 100
             ).round(1)
-            
-            # Combine with main stats
             stfd_performance['Win_Rate_%'] = win_rates
             stfd_performance = stfd_performance.sort_values('Total_Profit', ascending=False)
             
@@ -585,7 +600,6 @@ def generate_comprehensive_report(df: pd.DataFrame):
                 symbol, tf, direction = idx
                 print(f"   ✅ {symbol} + {tf} + {direction}: {stats['Win_Rate_%']}% WR, ${stats['Total_Profit']:.2f} profit")
             
-            # Filter for combinations with sufficient trades
             sufficient_trades = stfd_performance[stfd_performance['Trade_Count'] >= 3]
             if not sufficient_trades.empty:
                 print(f"\n📉 WORST PERFORMING COMBINATIONS (min 3 trades):")
@@ -593,12 +607,37 @@ def generate_comprehensive_report(df: pd.DataFrame):
                 for idx, stats in worst_combinations.iterrows():
                     symbol, tf, direction = idx
                     print(f"   ❌ {symbol} + {tf} + {direction}: {stats['Win_Rate_%']}% WR, ${stats['Total_Profit']:.2f} profit")
+        
+        # Add to report_lines
+        report_lines.append("")
+        report_lines.append(f"💰 COMPLETED TRADES ANALYSIS ({len(completed_trades)} trades)")
+        report_lines.append("-"*60)
+        report_lines.append(f"Total Profit: ${total_profit:.2f}")
+        report_lines.append(f"Win Rate: {win_rate:.1f}%")
+        report_lines.append(f"Average Profit per Trade: ${avg_profit:.2f}")
+        
+        if not stfd_performance.empty:
+            report_lines.append("")
+            report_lines.append("🏆 TOP PERFORMING COMBINATIONS:")
+            for idx, stats in top_combinations.iterrows():
+                symbol, tf, direction = idx
+                report_lines.append(f"   ✅ {symbol} + {tf} + {direction}: {stats['Win_Rate_%']}% WR, ${stats['Total_Profit']:.2f} profit")
+            
+            if not sufficient_trades.empty:
+                report_lines.append("")
+                report_lines.append("📉 WORST PERFORMING COMBINATIONS (min 3 trades):")
+                for idx, stats in worst_combinations.iterrows():
+                    symbol, tf, direction = idx
+                    report_lines.append(f"   ❌ {symbol} + {tf} + {direction}: {stats['Win_Rate_%']}% WR, ${stats['Total_Profit']:.2f} profit")
     
     # 3. STRATEGY RECOMMENDATIONS
     print(f"\n🎯 STRATEGY OPTIMIZATION RECOMMENDATIONS")
     print(f"{'-'*60}")
     
-    # Pending vs Instant recommendations
+    report_lines.append("")
+    report_lines.append("🎯 STRATEGY OPTIMIZATION RECOMMENDATIONS")
+    report_lines.append("-"*60)
+    
     if not pending_orders.empty:
         high_missed = pending_orders[pending_orders['Missed Opportunity'] == True]
         high_missed_grouped = high_missed.groupby(['Symbol', 'Timeframe']).size()
@@ -606,10 +645,12 @@ def generate_comprehensive_report(df: pd.DataFrame):
         
         if not high_missed_grouped.empty:
             print("🔔 CONSIDER SWITCHING TO INSTANT ORDERS:")
+            report_lines.append("🔔 CONSIDER SWITCHING TO INSTANT ORDERS:")
             for (symbol, timeframe), count in high_missed_grouped.items():
-                print(f"   📍 {symbol} on {timeframe}: {count} missed TP1 hits")
+                line = f"   📍 {symbol} on {timeframe}: {count} missed TP1 hits"
+                print(line)
+                report_lines.append(line)
     
-    # Risk management recommendations
     if not completed_trades.empty:
         losing_trades = completed_trades[completed_trades['Profit'] < 0]
         if not losing_trades.empty:
@@ -618,10 +659,23 @@ def generate_comprehensive_report(df: pd.DataFrame):
             print(f"📉 Risk Management:")
             print(f"   Average Loss: ${avg_loss:.2f}")
             print(f"   Maximum Loss: ${max_loss:.2f}")
-            
             if max_loss < -100:
                 print(f"   ⚠️  Consider tighter SL for large losses")
-
+            
+            report_lines.append("")
+            report_lines.append("📉 Risk Management:")
+            report_lines.append(f"   Average Loss: ${avg_loss:.2f}")
+            report_lines.append(f"   Maximum Loss: ${max_loss:.2f}")
+            if max_loss < -100:
+                report_lines.append(f"   ⚠️  Consider tighter SL for large losses")
+    
+    # Save the report to TXT file
+    txt_filename = os.path.join(OUTPUT_FOLDER, f"Comprehensive_Analysis_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt")
+    with open(txt_filename, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(report_lines))
+    
+    print(f"\nComprehensive text report saved: {txt_filename}")
+    
 def create_enhanced_visualizations(df: pd.DataFrame):
     """PREMIUM VISUALIZATIONS v3 – Exactly what you want (Nov 2025 Edition)"""
     if df.empty:

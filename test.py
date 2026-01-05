@@ -20,7 +20,7 @@ else:
     print("✅ Successfully connected to MT5!")
 
 
-FOREX_PAIRS = ["USDCHF.0"]
+FOREX_PAIRS = []
 XAUUSD = "XAUUSD.0"
 BTCUSD="BTCUSD.0"
 MAJORS = ["EURCHF.0","USDCHF.0"]
@@ -34,27 +34,31 @@ v=["Volatility 75 Index.0"]
 V1=["Volatility 50 Index.0"]
 SYNTHETICS = ["Step Index.0"]
 US =["US Tech 100.0","Wall Street 30.0"]
+BM5P =["Boom 300 Index.0","Volatility 10 Index.0","Volatility 100 Index.0","US Tech 100.0"]
+BM15P =["Volatility 10 Index.0","GBPUSD.0"]
+SM15P =["Step Index.0","Jump 25 Index.0","Volatility 100 Index.0"]
+BH1P=["EURCHF.0"]
 
-TIMEFRAME_H1 = BnC+[XAUUSD,BTCUSD]+US+SYNTHETICS+Jump+J
-H1_B= [XAUUSD,BTCUSD]+BnC+US+SYNTHETICS
+TIMEFRAME_H1 = BnC+[XAUUSD]+US+Jump+J+BH1P
+H1_B= [XAUUSD]+BnC+US+BH1P
 H1_S=Jump+J
 H1_BS=[]
-H1_pen= Jump+[BTCUSD]+J 
-H1_pl= [XAUUSD]+US+SYNTHETICS+BnC
+H1_pen= Jump+J+BH1P 
+H1_pl= [XAUUSD]+US+BnC
 
-TIMEFRAME_M15= FOREX_PAIRS+vol+[XAUUSD]+Jump+J+v
-M15_B= [XAUUSD]+FOREX_PAIRS+vol+v
-M15_S=Jump+J
+TIMEFRAME_M15= vol+[XAUUSD]+J+v+BM15P+SM15P
+M15_B= [XAUUSD]+FOREX_PAIRS+vol+v+BM15P
+M15_S=J+SM15P
 M15_BS=[]
-M15_pen= Jump+FOREX_PAIRS+vol+[XAUUSD]
-M15_pl= J+v
+M15_pen= Jump+vol+[XAUUSD]+v+BM15P+SM15P
+M15_pl= J
 
-TIMEFRAME_M5= MAJORS+[BTCUSD]+J+V1
+TIMEFRAME_M5= MAJORS+[BTCUSD]+J+V1+BM5P
 M5_S=J
-M5_B= MAJORS+[BTCUSD]+V1
+M5_B= MAJORS+[BTCUSD]+V1+BM5P
 M5_BS= []
-M5_pen= [BTCUSD]+V1
-M5_pl= MAJORS+J
+M5_pen= [BTCUSD]+BM5P
+M5_pl= MAJORS+J+V1
 
 active_channels = {}
 levels={}
