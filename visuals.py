@@ -21,39 +21,42 @@ else:
 
 
 # Define symbols and timeframes
-FOREX_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "CHFJPY",  "USDCHF","EURJPY"]
-XAUUSD = "XAUUSD"
-BTCUSD="BTCUSD"
-MAJORS = [ "EURCHF", "CADCHF","GBPCAD","USDCAD"]
-V100 = "Volatility 100 Index"
-BnC = ["Boom 900 Index","Boom 300 Index"]
-Jump = ["Jump 25 Index"]
-vol = ["Volatility 50 Index","Volatility 25 Index","Volatility 10 Index"]
-SYNTHETICS = ["Step Index"]
-US =["US Tech 100","Wall Street 30"]
-v=["Volatility 75 Index"]
-J=["Jump 75 Index"]
-C=["Crash 900 Index","Crash 300 Index"]
+Basket_Indices= ['AUD Basket', 'EUR Basket', 'GBP Basket', 'Gold Basket', 'USD Basket']
+Conversions= ['BCHUSD.conv', 'BTCUSD.conv', 'ETHUSD.conv', 'EURUSD.conv', 'LTCUSD.conv', 'USDAED.conv', 'XAGUSD.conv', 'XAUUSD.conv']
+Crash_Boom_Indices= ['Boom 1000 Index', 'Boom 150 Index', 'Boom 300 Index', 'Boom 500 Index', 'Boom 600 Index', 'Boom 900 Index', 'Crash 1000 Index', 'Crash 150 Index', 'Crash 300 Index', 'Crash 500 Index', 'Crash 600 Index', 'Crash 900 Index']
+Crypto= ['ADAUSD', 'ALGUSD', 'AVAUSD', 'BATUSD', 'BCHUSD', 'BNBUSD', 'BTCETH', 'BTCLTC', 'BTCUSD', 'DOGUSD', 'DOTUSD', 'DSHUSD', 'ETCUSD', 'ETHUSD', 'IOTUSD', 'LNKUSD', 'LTCUSD', 'SOLUSD', 'UNIUSD', 'XLMUSD', 'XRPUSD', 'ZECUSD']
+DEX_Indices= ['DEX 1500 DOWN Index', 'DEX 1500 UP Index', 'DEX 600 DOWN Index', 'DEX 600 UP Index', 'DEX 900 DOWN Index', 'DEX 900 UP Index']
+Energies= ['UK Brent Oil', 'US Oil']
+Forex_Major= ['AUDJPY', 'AUDUSD', 'EURAUD', 'EURCAD', 'EURCHF', 'EURGBP', 'EURJPY', 'EURUSD', 'GBPAUD', 'GBPJPY', 'GBPUSD', 'USDCAD', 'USDCHF', 'USDJPY']
+Forex_Minor= ['AUDCAD', 'AUDCHF', 'AUDNZD', 'CADCHF', 'CADJPY', 'CHFJPY', 'EURNOK', 'EURNZD', 'EURPLN', 'EURSEK', 'GBPCAD', 'GBPCHF', 'GBPNOK', 'GBPNZD', 'GBPSEK', 'NZDCAD', 'NZDJPY', 'NZDUSD', 'USDCNH', 'USDMXN', 'USDNOK', 'USDPLN', 'USDSEK', 'USDZAR']
+Jump_Indices= ['Jump 10 Index', 'Jump 100 Index', 'Jump 25 Index', 'Jump 50 Index', 'Jump 75 Index']
+Metals= ['XAGEUR', 'XAGUSD', 'XAUEUR', 'XAUUSD', 'XPDUSD', 'XPTUSD']
+Multi_Step_Indices= ['Multi Step 2 Index', 'Multi Step 3 Index', 'Multi Step 4 Index']
+Range_Break= ['Range Break 100 Index', 'Range Break 200 Index']
+Skewed_Step= ['Skew Step Index 4 Down', 'Skew Step Index 4 Up', 'Skew Step Index 5 Down', 'Skew Step Index 5 Up']
+Step_Indices= ['Step Index 200', 'Step Index 300', 'Step Index 400', 'Step Index 500', 'Step Index']
+Stock_Indices= ['Australia 200', 'China H Shares', 'Europe 50', 'France 40', 'Germany 40', 'Hong Kong 50', 'Japan 225', 'Netherlands 25', 'Spain 35', 'Swiss 20', 'UK 100', 'US Mid Cap 400', 'US SP 500', 'US Small Cap 2000', 'US Tech 100', 'Wall Street 30']
+Volatility_Indices= ['Volatility 10 (1s) Index', 'Volatility 10 Index', 'Volatility 100 (1s) Index', 'Volatility 100 Index', 'Volatility 15 (1s) Index', 'Volatility 150 (1s) Index', 'Volatility 25 (1s) Index', 'Volatility 25 Index', 'Volatility 30 (1s) Index', 'Volatility 50 (1s) Index', 'Volatility 50 Index', 'Volatility 75 (1s) Index', 'Volatility 75 Index', 'Volatility 90 (1s) Index']
 
-TIMEFRAME_H1 = BnC+MAJORS+[XAUUSD,BTCUSD]+US+SYNTHETICS+Jump+C+J
+TIMEFRAME_H1 = Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 H1_B= []
 H1_S=[]
-H1_BS=MAJORS+Jump+J+[XAUUSD,BTCUSD]+US+SYNTHETICS+C+BnC
-H1_pen= MAJORS+Jump+[BTCUSD]+J 
-H1_pl= [XAUUSD]+US+SYNTHETICS+C+BnC
+H1_BS=Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+H1_pen= Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+H1_pl= []
 
-TIMEFRAME_M15= FOREX_PAIRS+vol+[XAUUSD,V100]+SYNTHETICS+Jump+v+J+US
+TIMEFRAME_M15= Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M15_B= []
 M15_S=[]
-M15_BS=[XAUUSD,V100]+SYNTHETICS+FOREX_PAIRS+vol+v+Jump+J+US
-M15_pen= Jump+FOREX_PAIRS+vol+[XAUUSD,V100]+SYNTHETICS+v
-M15_pl= J+US
+M15_BS=Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M15_pen= Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M15_pl= []
 
-TIMEFRAME_M5= BnC+MAJORS+FOREX_PAIRS+vol+[XAUUSD,V100,BTCUSD]+SYNTHETICS+Jump+C+J+US
+TIMEFRAME_M5= Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M5_S=[]
 M5_B= []
-M5_BS= Jump+J+US+SYNTHETICS+MAJORS+FOREX_PAIRS+vol+[XAUUSD,V100,BTCUSD]+BnC+C
-M5_pen= BnC+MAJORS+FOREX_PAIRS+vol+[XAUUSD,V100,BTCUSD]+SYNTHETICS+Jump+C+J+US
+M5_BS=Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M5_pen= Basket_Indices+Conversions+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M5_pl= []
 
 active_channels = {}

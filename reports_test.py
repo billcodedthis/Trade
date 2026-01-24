@@ -60,35 +60,26 @@ TIMEFRAMES = {
 
 # Trading configuration from visuals.py
 def get_trading_config():
-    FOREX_PAIRS = []
     XAUUSD = "XAUUSD.0"
     BTCUSD="BTCUSD.0"
     MAJORS = ["EURCHF.0","USDCHF.0"]
-    V100 = "Volatility 100 Index.0"
-    BnC = ["Boom 900 Index.0"]
-    C=["Crash 900 Index.0"]
     Jump = ["Jump 25 Index.0"]
     J=["Jump 75 Index.0"]
-    vol = ["Volatility 10 Index.0","Volatility 50 Index.0"]
+    vol = ["Volatility 10 Index.0"]
     v=["Volatility 75 Index.0"]
-    V1=["Volatility 50 Index.0"]
-    SYNTHETICS = ["Step Index.0"]
-    US =["US Tech 100.0","Wall Street 30.0"]
-    BM5P =["Boom 300 Index.0","Volatility 10 Index.0","Volatility 100 Index.0","US Tech 100.0"]
-    BM15P =["Volatility 10 Index.0","GBPUSD.0"]
-    SM15P =["Step Index.0","Jump 25 Index.0","Volatility 100 Index.0"]
-    BH1P=["EURCHF.0"]
+    US =["Wall Street 30.0"]
+    
     return {
-        "H1_PENDING": Jump+J+BH1P ,
-        "H1_INSTANT": [XAUUSD]+US+BnC,
-        "M15_PENDING": Jump+vol+[XAUUSD]+v+BM15P+SM15P,
+        "H1_PENDING": Jump+J ,
+        "H1_INSTANT": [XAUUSD]+US,
+        "M15_PENDING": Jump+vol+[XAUUSD]+v,
         "M15_INSTANT": J,
-        "M5_PENDING": [BTCUSD]+BM5P,
-        "M5_INSTANT": MAJORS+J+V1
+        "M5_PENDING": [BTCUSD],
+        "M5_INSTANT": MAJORS+J
     }
 
 def get_all_deals():
-    from_date = datetime(2026, 1, 5)
+    from_date = datetime(2026, 1, 1)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -107,7 +98,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2026, 1, 5)
+    from_date = datetime(2026, 1, 1)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:
@@ -345,6 +336,9 @@ def analyze_pending_orders_enhanced():
             if symbol in config["M5_PENDING"]: order_type = "PENDING"
             elif symbol in config["M5_INSTANT"]: order_type = "INSTANT"
 
+        if order_type == "UNKNOWN":
+            continue
+
         records.append({
             "Symbol": symbol,
             "Timeframe": tf_str,
@@ -445,6 +439,9 @@ def analyze_completed_trades():
         if tf_key:
             if symbol in config.get(f"{tf_key}_PENDING", []) or symbol in config.get(f"{tf_key}_INSTANT", []):
                 order_type = "PENDING" if symbol in config.get(f"{tf_key}_PENDING", []) else "INSTANT"
+
+        if order_type == "UNKNOWN":
+            continue
 
         records.append({
             "Symbol": symbol,
