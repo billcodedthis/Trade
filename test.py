@@ -25,7 +25,6 @@ BTCUSD="BTCUSD.0"
 MAJORS = ["EURCHF.0","USDCHF.0"]
 Jump = ["Jump 25 Index.0"]
 J=["Jump 75 Index.0"]
-vol = ["Volatility 10 Index.0"]
 v=["Volatility 75 Index.0"]
 US =["Wall Street 30.0"]
 
@@ -36,11 +35,11 @@ H1_BS=[]
 H1_pen= Jump+J
 H1_pl= [XAUUSD]+US
 
-TIMEFRAME_M15= vol+[XAUUSD]+J+v
-M15_B= [XAUUSD]+vol+v
+TIMEFRAME_M15= [XAUUSD]+J+v
+M15_B= [XAUUSD]+v
 M15_S=J
 M15_BS=[]
-M15_pen= Jump+vol+[XAUUSD]+v
+M15_pen= Jump+[XAUUSD]+v
 M15_pl= J
 
 TIMEFRAME_M5= MAJORS+[BTCUSD]+J
