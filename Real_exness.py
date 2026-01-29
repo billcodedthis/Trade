@@ -1134,11 +1134,25 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 entry_price = position.price_open
                 current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
                 direction = "SELL" if position.type == mt5.ORDER_TYPE_SELL else "BUY"
+                entry_time = pd.to_datetime(position.time_setup, unit='s')
                 
 
+                rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
+                if rates is None or len(rates) == 0:
+                    continue
+                recent_candles = pd.DataFrame(rates)
+                recent_candles['time'] = pd.to_datetime(recent_candles['time'], unit='s')
+                crossed_tp1 = False
+                if direction == "BUY":
+                    if (recent_candles['high'] >= Tp1).any():
+                        crossed_tp1 = True
+                elif direction == "SELL":
+                    if (recent_candles['low'] <= Tp1).any():
+                        crossed_tp1 = True
+
                 # Original TP1 logic (half position & move SL to breakeven)
-                if (position.type == mt5.ORDER_TYPE_BUY and current_price >= Tp1) or \
-                (position.type == mt5.ORDER_TYPE_SELL and current_price <= Tp1):
+                if (position.type == mt5.ORDER_TYPE_BUY and crossed_tp1) or \
+                (position.type == mt5.ORDER_TYPE_SELL and crossed_tp1):
                     if position.volume == get_min_lot_size(symbol):
                         modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         continue
@@ -1165,11 +1179,11 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         }
                         close_result = mt5.order_send(close_request)
                         if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
+                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                             print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         elif close_result.comment == "Invalid volume":
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
+                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                             print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         else:
@@ -1185,12 +1199,26 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
                 magic =position.magic
                 direction = "SELL" if position.type == mt5.ORDER_TYPE_SELL else "BUY"
+                entry_time = pd.to_datetime(position.time_setup, unit='s')
                 
+
+                rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
+                if rates is None or len(rates) == 0:
+                    continue
+                recent_candles = pd.DataFrame(rates)
+                recent_candles['time'] = pd.to_datetime(recent_candles['time'], unit='s')
+                crossed_tp1 = False
+                if direction == "BUY":
+                    if (recent_candles['high'] >= tp1).any():
+                        crossed_tp1 = True
+                elif direction == "SELL":
+                    if (recent_candles['low'] <= tp1).any():
+                        crossed_tp1 = True
 
                 # Original TP1 logic (half position & move SL to breakeven)
                 if timeframe == magic:
-                    if (position.type == mt5.ORDER_TYPE_BUY and current_price >= tp1 ) or \
-                    (position.type == mt5.ORDER_TYPE_SELL and current_price <= tp1 ):
+                    if (position.type == mt5.ORDER_TYPE_BUY and crossed_tp1 ) or \
+                    (position.type == mt5.ORDER_TYPE_SELL and crossed_tp1 ):
                         if position.volume == get_min_lot_size(symbol):
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             continue
@@ -1217,11 +1245,11 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                             }
                             close_result = mt5.order_send(close_request)
                             if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
+                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction} positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                                 print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
                                 modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             elif close_result.comment == "Invalid volume":
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
+                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction} positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                                 print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
                                 modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             else:
@@ -1232,46 +1260,68 @@ def del_completed():
         for (symbol,timeframe) in list(levels.keys()):  # Use list to avoid runtime modification issues
             L = levels[(symbol,timeframe)]
             direction = L.get("direction")
+            entry_time = L["entry_time"] 
+            sl = L["sl"]
+            sl1 = L["sl1"]
+            tp2 = L["tp2"]
             if not direction:
                 continue
 
-            # Get current price
-            current_price = mt5.symbol_info_tick(symbol).bid if direction =="SELL" else mt5.symbol_info_tick(symbol).ask
-                 # Use current market price
+            rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
+            if rates is None or len(rates) == 0:
+                continue
+            recent_candles = pd.DataFrame(rates)
+            recent_candles['time'] = pd.to_datetime(recent_candles['time'], unit='s')
+            crossed_tp2 = False
+            crossed_sl1 = False
+            crossed_sl =  False
+            if direction == "BUY":
+                # For BUY positions: TP when price goes up, SL when price goes down
+                crossed_tp2 = (recent_candles['high'] >= tp2).any()
+                crossed_sl1 = (recent_candles['low'] <= sl1).any()
+                crossed_sl = (recent_candles['low'] <= sl).any()
+                
+            elif direction == "SELL":
+                # For SELL positions: TP when price goes down, SL when price goes up
+                crossed_tp2 = (recent_candles['low'] <= tp2).any()
+                crossed_sl1 = (recent_candles['high'] >= sl1).any()
+                crossed_sl = (recent_candles['high'] >= sl).any()
 
-            if timeframe== mt5.TIMEFRAME_M1:
+            if timeframe== mt5.TIMEFRAME_M5:
                 if symbol in M1_pen :
-                    if (direction == "BUY" and current_price <= L["sl"]) or (direction == "SELL" and current_price >= L["sl"]):
+                    if (direction == "BUY" and crossed_sl) or (direction == "SELL" and crossed_sl):
                         start_cooldown(symbol, timeframe)
                         # Hit SL - delete channel and levels
                         if (symbol, timeframe) in active_channels:
-                            send_telegram_message(f"🚨 {symbol} {direction}  hit Exness SL on {timeframe_to_str(timeframe)}")
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
                             del active_channels[(symbol,timeframe)]
                         if (symbol, timeframe) in levels:
                             del levels[(symbol,timeframe)]
                         print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
                         continue  # Skip TP check since we already hit SL
                 elif symbol in M1_pl:
-                    if (direction == "BUY" and current_price <= L["sl1"]) or (direction == "SELL" and current_price >= L["sl1"]):
+                    if (direction == "BUY" and crossed_sl1) or (direction == "SELL" and crossed_sl1):
                         start_cooldown(symbol, timeframe)
                         # Hit SL - delete channel and levels
                         if (symbol, timeframe) in active_channels:
-                            send_telegram_message(f"🚨 {symbol} {direction}  hit Exness SL on {timeframe_to_str(timeframe)}")
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
                             del active_channels[(symbol,timeframe)]
                         if (symbol, timeframe) in levels:
                             del levels[(symbol,timeframe)]
                         print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
                         continue  # Skip TP check since we already hit SL
             
-            if (direction == "BUY" and current_price >= L["tp2"]) or (direction == "SELL" and current_price <= L["tp2"]):
+
+            # Check TP2
+            if (direction == "BUY" and crossed_tp2) or (direction == "SELL" and crossed_tp2):
                 # Hit TP2 - delete channel and levels
                 if (symbol, timeframe) in active_channels:
                     plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
-                    send_telegram_image(plot_filename, f"✅ {symbol} {direction} hit Exness TP2 on {timeframe_to_str(timeframe)}")
+                    send_telegram_image(plot_filename, f"✅ {symbol} {direction} hit Deriv TP2 on {timeframe_to_str(timeframe)}")
                     del active_channels[(symbol,timeframe)]
                 if (symbol, timeframe) in levels:
                     del levels[(symbol,timeframe)]
-                print(f"✅ {symbol} {direction} hit TP2 - channel removed.")    
+                print(f"✅ {symbol} {direction} hit TP2 - channel removed.")  
  
 def update_pending_order_status():
     for (symbol, timeframe) in list(levels.keys()):
@@ -1615,14 +1665,14 @@ def check_a_plus_setup(symbol,df, trend_slope):
         }
         
         # Define higher timeframes for zone detection
-        higher_timeframes = [mt5.TIMEFRAME_M30, mt5.TIMEFRAME_M15]
+        higher_timeframes = [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M5]
         
         for ht in higher_timeframes:
             try:
                 # Fetch historical data from higher timeframe
                 historical_data = get_candles(symbol, ht, 200)  # More bars for better zone detection
                 if historical_data.empty:
-                    print(f"⚠️ No M15/M30 data for {symbol} on {timeframe_to_str(ht)}")
+                    print(f"⚠️ No M5/M15 data for {symbol} on {timeframe_to_str(ht)}")
                     continue
                 
                 # Analyze zones for this higher timeframe
@@ -1703,7 +1753,7 @@ def preload_supply_demand_zones():
     # Get all symbols from your configuration
     all_symbols = set(TIMEFRAME_M1)
     
-    print("🔄 Preloading M15/M30 supply-demand zones for all symbols...")
+    print("🔄 Preloading M5/M15 supply-demand zones for all symbols...")
     
     for symbol in all_symbols:
         if symbol not in supply_demand_zones:
@@ -1714,7 +1764,7 @@ def preload_supply_demand_zones():
             }
             
             # Define higher timeframes for zone detection
-            higher_timeframes = [mt5.TIMEFRAME_M30, mt5.TIMEFRAME_M15]
+            higher_timeframes = [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M5]
             
             for ht in higher_timeframes:
                 try:
@@ -1770,9 +1820,16 @@ while True:
     try:
         if not is_connected():
             print("🚫 Network or MT5 disconnected.")
-            clear_plots_folder()
             mt5.shutdown()
-            sys.exit("❌ Terminating script due to disconnection.")
+            check_time = datetime.now() + timedelta(minutes=10)
+            print(f"\033[92m Waiting for network reconnection at {check_time.strftime("%H:%M:%S")}...\033[0m")
+            time.sleep(600)
+            if is_connected():
+                print("✅ Network or MT5 reconnected.")
+                send_telegram_message("✅ Network or MT5 reconnected.")
+            else:
+                clear_plots_folder()
+                sys.exit("❌ Terminating script due to disconnection.")
         if zone_last_loaded is None or should_reload_zones():
             print("🔄 Initializing supply/demand zones...")
             preload_supply_demand_zones()
