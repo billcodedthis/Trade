@@ -1134,7 +1134,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 entry_price = position.price_open
                 current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
                 direction = "SELL" if position.type == mt5.ORDER_TYPE_SELL else "BUY"
-                entry_time = pd.to_datetime(position.time_setup, unit='s')
+                entry_time = pd.to_datetime(position.time, unit='s')
                 
 
                 rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
@@ -1199,7 +1199,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
                 magic =position.magic
                 direction = "SELL" if position.type == mt5.ORDER_TYPE_SELL else "BUY"
-                entry_time = pd.to_datetime(position.time_setup, unit='s')
+                entry_time = pd.to_datetime(position.time, unit='s')
                 
 
                 rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
