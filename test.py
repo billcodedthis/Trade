@@ -22,7 +22,7 @@ else:
 
 XAUUSD = "XAUUSD.0"
 BTCUSD="BTCUSD.0"
-MAJORS = ["EURCHF.0","USDCHF.0"]
+MAJORS = ["EURCHF.0"]
 Jump = ["Jump 25 Index.0"]
 J=["Jump 75 Index.0"]
 v=["Volatility 75 Index.0"]
@@ -57,7 +57,7 @@ active_trades={}
 cooldown = {} 
 
 DOWNLOADS_FOLDER = str(Path.home() / "OneDrive - University of Ghana")
-PLOTS_FOLDER = os.path.join(DOWNLOADS_FOLDER, "MT5_Regression_Channels_real_deriv_tt")
+PLOTS_FOLDER = os.path.join(DOWNLOADS_FOLDER, "MT5_Regression_Channels_test")
 
 # Create the folder if it doesn't exist
 if not os.path.exists(PLOTS_FOLDER):
@@ -255,6 +255,9 @@ def send_telegram_message(text):
             print(f"❌ Failed to send message to Telegram: {response.text}")
     except Exception as e:
         print(f"❌ Telegram error: {e}")
+
+def decimal_places(n):
+    return len(str(n).rstrip('0').split('.')[-1]) if '.' in str(n) else 0
 
 def timeframe_to_str(timeframe):
     """Convert MT5 timeframe constant to human-readable string"""
@@ -1201,7 +1204,8 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                     if position.sl == position.price_open:
                         print(f"✅ Position {position.ticket} for {symbol} SL has already been modified")
                     else:
-                        half_lot = round(position.volume / 2, 2)
+                        t = decimal_places(get_min_lot_size(symbol))
+                        half_lot = round(position.volume / 2, t)
                         close_request = {
                             "action": mt5.TRADE_ACTION_DEAL,
                             "symbol": symbol,
@@ -1267,7 +1271,8 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         if position.sl == position.price_open:
                             print(f"✅ Position {position.ticket} for {symbol} SL has already been modified")
                         else:
-                            half_lot = round(position.volume / 2, 2)
+                            t = decimal_places(get_min_lot_size(symbol))
+                            half_lot = round(position.volume / 2, t)
                             close_request = {
                                 "action": mt5.TRADE_ACTION_DEAL,
                                 "symbol": symbol,
@@ -1497,6 +1502,7 @@ def detect_opposite_engulfing(df, direction, symbol, timeframe):
             if df['close'].iloc[i] >= df['open'].iloc[i-1]: continue
             # Check if engulfing candle's open is higher than entry price
             if df['open'].iloc[i] <= entry_price: continue
+            if max(df['high'].iloc[i-3:i]) <= entry_price: continue
             # Confirmed by next candle closing lower
             if df['close'].iloc[i+1] >= df['close'].iloc[i]: continue
             return i
@@ -1509,6 +1515,7 @@ def detect_opposite_engulfing(df, direction, symbol, timeframe):
             if df['close'].iloc[i] <= df['open'].iloc[i-1]: continue
             # Check if engulfing candle's open is lower than entry price
             if df['open'].iloc[i] >= entry_price: continue
+            if min(df['low'].iloc[i-3:i]) >= entry_price: continue
             # Confirmed by next candle closing higher
             if df['close'].iloc[i+1] <= df['close'].iloc[i]: continue
             return i
@@ -1540,7 +1547,8 @@ def handle_engulfing_patterns():
                         min_lot = get_min_lot_size(symbol)
                         if count == 1:
                             if pos.volume > min_lot:
-                                half = round(pos.volume / 2, 2)
+                                t = decimal_places(get_min_lot_size(symbol))
+                                half = round(pos.volume / 2, t)
                                 current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
@@ -1565,7 +1573,8 @@ def handle_engulfing_patterns():
                                 modify_trade_to_breakeven(symbol, pos.ticket, pos.price_open)
                         elif count >= 2 :
                             if pos.volume > min_lot:
-                                half = round(pos.volume / 2, 2)
+                                t = decimal_places(get_min_lot_size(symbol))
+                                half = round(pos.volume / 2, t)
                                 current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
@@ -1638,7 +1647,8 @@ def handle_engulfing_patterns():
                     min_lot = get_min_lot_size(symbol)
                     if count == 1:
                         if pos.volume > min_lot:
-                            half = round(pos.volume / 2, 2)
+                            t = decimal_places(get_min_lot_size(symbol))
+                            half = round(pos.volume / 2, t)
                             current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {
@@ -1663,7 +1673,8 @@ def handle_engulfing_patterns():
                             modify_trade_to_breakeven(symbol, pos.ticket, pos.price_open)
                     elif count >= 2:
                         if pos.volume > min_lot:
-                            half = round(pos.volume / 2, 2)
+                            t = decimal_places(get_min_lot_size(symbol))
+                            half = round(pos.volume / 2, t)
                             current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {

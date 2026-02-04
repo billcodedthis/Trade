@@ -62,7 +62,7 @@ TIMEFRAMES = {
 def get_trading_config():
     XAUUSD = "XAUUSD.0"
     BTCUSD="BTCUSD.0"
-    MAJORS = ["EURCHF.0","USDCHF.0"]
+    MAJORS = ["EURCHF.0"]
     Jump = ["Jump 25 Index.0"]
     J=["Jump 75 Index.0"]
     v=["Volatility 75 Index.0"]

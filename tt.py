@@ -1,3 +1,69 @@
+'''
+def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
+    if abs(sl1 - entry_price) >= abs(tp - entry_price):
+        print(f"🚫 Trade not placed: SL is greater than TP for {symbol}.")
+        return
+    positions = mt5.positions_get(symbol=symbol)
+    if positions is not None:
+        for position in positions:
+            if timeframe == position.magic:
+                print(f"🚫 Trade not placed: An open position already exists for {symbol}.")
+                return
+    account_info = mt5.account_info()
+    if account_info is None:
+        print(f"❌ Failed to get account info ")
+        return
+    balance = account_info.balance()
+    if balance <= 0:
+        print(f"❌ Insufficient or zero balance ")
+        return
+    min_lot = get_min_lot_size(symbol)
+    if min_lot is None:
+        print(f"❌ Could not get min lot size for {symbol}.")
+        return
+    volume = lot_size(symbol)
+    order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+    t = decimal_places(min_lot)  # For rounding precision
+    while volume >= min_lot:
+        profit = mt5.order_calc_profit(order_type, symbol, volume, entry_price, sl1)
+        if profit is None:
+            print(f"❌ Failed to calculate profit for {symbol}.")
+            return
+        loss = abs(profit)  # Potential loss at SL
+        risk_pct = (loss / balance) * 100
+        if risk_pct <= 20:
+            break  # Acceptable risk
+        # Halve and retry
+        volume = round(volume / 2, t)
+    if volume < min_lot:
+        print(f"{symbol},{direction}@{entry_price} sl:{sl1},tp:{tp} failed: Risk still above 20% even at minimum lot size.")
+        return
+    # Place the trade with adjusted volume
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL ,
+        "symbol": symbol,
+        "volume": volume ,
+        "type": order_type,
+        "price": entry_price,
+        "sl": sl1,
+        "tp": tp,
+        "deviation": 10,
+        "magic": timeframe,
+        "comment": f"{levels[(symbol,timeframe)]["tp1"]}",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_FOK,
+    }
+    order = mt5.order_send(request)
+    if order.retcode == mt5.TRADE_RETCODE_DONE:
+        plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
+        send_telegram_image(plot_filename,f"🚀 <b>Deriv Market Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {entry_price:.4f}\nSL: {sl1:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {tp:.4f}")
+        print(f"Trade placed: {direction} {symbol} @ {entry_price}")
+        levels[(symbol, timeframe)]['entry'] = entry_price
+    else:
+        print(f"{symbol},{direction}@{entry_price} sl:{sl1},tp:{tp} failed: {order.comment}")
+
+
+'''      
 
 '''# Adjust lot size for risk
     initial_lot = lot_size(symbol)
