@@ -1292,7 +1292,7 @@ def del_completed():
                 crossed_sl1 = (recent_candles['high'] >= sl1).any()
                 crossed_sl = (recent_candles['high'] >= sl).any()
 
-            if timeframe== mt5.TIMEFRAME_M5:
+            if timeframe== mt5.TIMEFRAME_M1:
                 if symbol in M1_pen :
                     if (direction == "BUY" and crossed_sl) or (direction == "SELL" and crossed_sl):
                         start_cooldown(symbol, timeframe)
