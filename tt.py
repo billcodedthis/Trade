@@ -354,3 +354,5 @@ def del_completed():
                 print(f"✅ {symbol} {direction} hit TP2 - channel removed.")  
  
 '''
+
+

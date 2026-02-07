@@ -921,7 +921,7 @@ def detect_break(df, symbol,timeframe):
                 breakout = i
                 active_channels[(symbol,timeframe)]["breakout_idx"] = breakout
                 # Find last touch before breakout
-                for j in range(breakout - 10, 0, -1):
+                for j in range(breakout - 10, 10, -1):
                     if df['high'].iloc[j] >= df['upper'].iloc[j]:
                         if df['close'].iloc[j] < df['open'].iloc[j] and df['open'].iloc[j] > df['upper'].iloc[breakout]:
                                 active_channels[(symbol,timeframe)]["last_touch_price"] = df['open'].iloc[j]
@@ -940,7 +940,7 @@ def detect_break(df, symbol,timeframe):
                 breakout = i
                 active_channels[(symbol,timeframe)]["breakout_idx"] = breakout
                 # Find last touch before breakout
-                for j in range(breakout - 10, 0, -1):
+                for j in range(breakout - 10, 10, -1):
                     if df['low'].iloc[j] <= df['lower'].iloc[j]:
                         if df['close'].iloc[j] > df['open'].iloc[j] and df['open'].iloc[j] < df['lower'].iloc[breakout]:
                                 active_channels[(symbol,timeframe)]["last_touch_price"] = df['open'].iloc[j]
@@ -1728,6 +1728,99 @@ def handle_engulfing_patterns():
                             del old_engulfs[key]
                             if key in active_channels: del active_channels[key]
 
+def check_engulfing_before_tp1_for_breakeven_trades():
+    """Check if engulfing patterns occurred before TP1 was hit for breakeven trades"""
+    for ticket in list(breakeven_trades):
+        position = mt5.positions_get(ticket=ticket)
+        if not position:
+            continue
+        
+        position = position[0]
+        symbol = position.symbol
+        timeframe = position.magic
+        trade_direction = "BUY" if position.type == mt5.ORDER_TYPE_BUY else "SELL"
+        entry_price = position.price_open
+
+        if position.sl != position.price_open :
+            print(f"Skipping {symbol} ticket {ticket} — SL already adjusted from breakeven")
+            continue
+        
+        # Get TP1 from position comment
+        tp1 = None
+        try:
+            if position.comment and position.comment.strip():
+                tp1 = float(position.comment)
+        except ValueError:
+            pass
+        
+        if not tp1:
+            continue
+        
+        # Get trade entry time
+        entry_time = pd.to_datetime(position.time, unit='s')
+        
+        # Check if engulfing happened before TP1
+        key = (symbol, timeframe)
+        engulf_time = None
+        
+        # Get engulf time from levels or old_engulfs
+        if key in levels and 'last_engulf_time' in levels[key]:
+            engulf_time = levels[key]['last_engulf_time']
+        elif key in old_engulfs and 'last_engulf_time' in old_engulfs[key]:
+            engulf_time = old_engulfs[key]['last_engulf_time']
+        
+        # Fetch candles from entry to now to check when TP1 was hit
+        rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
+        if rates is None or len(rates) == 0:
+            continue
+        
+        recent_candles = pd.DataFrame(rates)
+        recent_candles['time'] = pd.to_datetime(recent_candles['time'], unit='s')
+        
+        # Find when TP1 was first hit
+        tp1_hit_time = None
+        for i in range(len(recent_candles)):
+            if trade_direction == "BUY":
+                if recent_candles['high'].iloc[i] >= tp1:
+                    tp1_hit_time = recent_candles['time'].iloc[i]
+                    break
+            elif trade_direction == "SELL":
+                if recent_candles['low'].iloc[i] <= tp1:
+                    tp1_hit_time = recent_candles['time'].iloc[i]
+                    break
+        
+        # If both engulfing and TP1 hit occurred, compare times
+        if engulf_time and tp1_hit_time:
+            if engulf_time < tp1_hit_time:
+                print(f"⚠️ Engulfing detected at {engulf_time} (BEFORE TP1 hit at {tp1_hit_time}) for {symbol} "
+                      f"on {timeframe_to_str(timeframe)}")
+                
+                if trade_direction == 'BUY':
+                    distance_to_tp1 = tp1 - entry_price
+                    new_sl = entry_price + (distance_to_tp1 * 0.3)  # 30% of the way to TP1
+                else:  # SELL
+                    distance_to_tp1 = entry_price - tp1
+                    new_sl = entry_price - (distance_to_tp1 * 0.3)  # 30% of the way to TP1
+                
+                request = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "position": ticket,
+                    "sl": new_sl,
+                    "tp": position.tp,  # Keep original TP
+                    "symbol": symbol,
+                    "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_FOK,
+                }
+                
+                result = mt5.order_send(request)
+                if result.retcode == mt5.TRADE_RETCODE_DONE:
+                    print(f"✅ Tightened SL for breakeven trade {symbol}: New SL={new_sl:.5f}")
+                    send_telegram_message(f"✅ Tightened SL for {symbol} {trade_direction} on {timeframe_to_str(timeframe)} due to pre-TP1 engulfing : New SL={new_sl:.5f}")
+                else:
+                    print(f"❌ Failed to tighten SL for {symbol}: {result.comment}")
+            else:
+                print(f"ℹ️ Engulfing happened AFTER TP1 hit for {symbol}, no SL adjustment needed")
+
 def check_conflicting_slopes():
     """Check for conflicting slopes across all possible timeframe combinations"""
     # Get all active symbols across all timeframes
@@ -2192,6 +2285,7 @@ while True:
         del_completed()
         update_pending_order_status()
         handle_engulfing_patterns()
+        check_engulfing_before_tp1_for_breakeven_trades()
         active=[]
 
         active_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5)
