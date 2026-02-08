@@ -2062,6 +2062,7 @@ def update_profit_tracking():
                     profit_tracking[ticket]['breakeven_applied'] = True
                     hours = required_duration.total_seconds() / 3600
                     print(f"⏰ Position {ticket} has been in profit for {hours:.1f} hours - applying breakeven")
+                    send_telegram_message(f"⏰ {position.symbol} trade on {timeframe} has been in profit for {hours:.1f} hours - applying breakeven")
         
         else:
             # No longer in profit - reset tracking
@@ -2334,13 +2335,18 @@ while True:
         if not is_connected():
             print("🚫 Network or MT5 disconnected.")
             mt5.shutdown()
-            check_time = datetime.now() + timedelta(minutes=10)
-            print(f"\033[92m Waiting for network reconnection at {check_time.strftime("%H:%M:%S")}...\033[0m")
-            time.sleep(600)
-            if is_connected():
-                print("✅ Network or MT5 reconnected.")
-                send_telegram_message("✅ Network or MT5 reconnected.")
-            else:
+            reconnected=False
+            max_attempts =3
+            for i in range(0,max_attempts):
+                check_time = datetime.now() + timedelta(minutes=10)
+                print(f"\033[92m Waiting for network reconnection at {check_time.strftime("%H:%M:%S")}...\033[0m")
+                time.sleep(600)
+                if is_connected():
+                    reconnected=True
+                    print("✅ Network or MT5 reconnected.")
+                    send_telegram_message("✅ Network or MT5 reconnected.")
+                    break
+            if not reconnected:
                 clear_plots_folder()
                 sys.exit("❌ Terminating script due to disconnection.")
         if zone_last_loaded is None or should_reload_zones():
