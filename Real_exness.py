@@ -50,6 +50,7 @@ old_engulfs={}
 breakeven_trades = {}
 active_trades={}
 cooldown = {} 
+profit_tracking = {}  
 
 DOWNLOADS_FOLDER = str(Path.home() / "OneDrive - University of Ghana")
 PLOTS_FOLDER = os.path.join(DOWNLOADS_FOLDER, "MT5_Regression_Channels_real_exness")
@@ -1674,6 +1675,76 @@ def check_engulfing_before_tp1_for_breakeven_trades():
             else:
                 print(f"ℹ️ Engulfing happened AFTER TP1 hit for {symbol}, no SL adjustment needed")
 
+def update_profit_tracking():
+    """Update profit tracking for all active positions"""
+    positions = mt5.positions_get()
+    if positions is None:
+        return
+    
+    current_time = datetime.now()
+    
+    for position in positions:
+        ticket = position.ticket
+        
+        # Get duration for this timeframe
+        required_duration = timedelta(minutes=48)
+
+        # Initialize tracking for new positions
+        if ticket not in profit_tracking:
+            profit_tracking[ticket] = {
+                'profit_time': None,
+                'in_profit': False,
+                'breakeven_applied': False
+            }
+        
+        # Get current profit
+        current_profit = position.profit
+        
+        if position.sl == position.price_open or profit_tracking[ticket]['breakeven_applied']:
+            print(f"Position {ticket} has breakeven already applied")
+            continue
+
+        # Check if in profit
+        if current_profit > 0:
+            # If just entered profit, record the time
+            if not profit_tracking[ticket]['in_profit']:
+                profit_tracking[ticket]['profit_time'] = current_time
+                profit_tracking[ticket]['in_profit'] = True
+                print(f"💰 Position {ticket} entered profit at {current_time.strftime('%H:%M:%S')}")
+            
+            # Check if required duration has passed since entering profit
+            if (profit_tracking[ticket]['profit_time'] is not None and 
+                not profit_tracking[ticket]['breakeven_applied']):
+                
+                time_in_profit = current_time - profit_tracking[ticket]['profit_time']
+                
+                if time_in_profit >= required_duration:
+                    # Apply breakeven
+                    modify_trade_to_breakeven(position.symbol, ticket, position.price_open)
+                    profit_tracking[ticket]['breakeven_applied'] = True
+                    minutes = required_duration.total_seconds() / 60
+                    print(f"⏰ Position {ticket} has been in profit for {minutes:.1f} minutes - applying breakeven")
+        
+        else:
+            # No longer in profit - reset tracking
+            if profit_tracking[ticket]['in_profit']:
+                profit_tracking[ticket]['profit_time'] = None
+                profit_tracking[ticket]['in_profit'] = False
+                print(f"📉 Position {ticket} fell out of profit - resetting timer")
+
+def cleanup_profit_tracking():
+    """Remove completed trades from profit tracking"""
+    positions = mt5.positions_get()
+    if positions is None:
+        positions = []
+    
+    active_tickets = {pos.ticket for pos in positions}
+    
+    # Remove tracking for closed positions
+    for ticket in list(profit_tracking.keys()):
+        if ticket not in active_tickets:
+            del profit_tracking[ticket]
+
 def monitor_breakeven_trades():
     for ticket in list(breakeven_trades):
         if ticket in list(active_trades):
@@ -1940,6 +2011,8 @@ while True:
         clean_manual_deleted()
         monitor_breakeven_trades()
         monitor_active_trades()
+        update_profit_tracking()
+        cleanup_profit_tracking()
         del_completed()
         update_pending_order_status()
         handle_engulfing_patterns()
