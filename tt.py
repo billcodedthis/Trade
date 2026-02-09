@@ -147,3 +147,78 @@ Step_Indices= ['Step Index 200', 'Step Index 300', 'Step Index 400', 'Step Index
 Stock_Indices= ['Australia 200', 'China H Shares', 'Europe 50', 'France 40', 'Germany 40', 'Hong Kong 50', 'Japan 225', 'Netherlands 25', 'Spain 35', 'Swiss 20', 'UK 100', 'US Mid Cap 400', 'US SP 500', 'US Small Cap 2000', 'US Tech 100', 'Wall Street 30']
 Volatility_Indices= ['Volatility 10 (1s) Index', 'Volatility 10 Index', 'Volatility 100 (1s) Index', 'Volatility 100 Index', 'Volatility 15 (1s) Index', 'Volatility 150 (1s) Index', 'Volatility 25 (1s) Index', 'Volatility 25 Index', 'Volatility 30 (1s) Index', 'Volatility 50 (1s) Index', 'Volatility 50 Index', 'Volatility 75 (1s) Index', 'Volatility 75 Index', 'Volatility 90 (1s) Index']
 
+'''
+TIMEFRAME_PROFIT_BARS = 48  # Consistent across all (was implicit in your durations)
+
+def update_profit_tracking():
+    """Update profit tracking using candle-based bar counts for all active positions"""
+    positions = mt5.positions_get()
+    if positions is None:
+        return
+    
+    for position in positions:
+        ticket = position.ticket
+        symbol = position.symbol
+        timeframe = position.magic  # Use the position's timeframe
+        direction = "BUY" if position.type == mt5.ORDER_TYPE_BUY else "SELL"
+        entry_price = position.price_open
+        current_profit = position.profit
+        
+        # Skip if not currently in profit (real-time check as gatekeeper)
+        if current_profit <= 0:
+            if ticket in profit_tracking:
+                del profit_tracking[ticket]  # Reset tracking if out of profit
+            continue
+        
+        # Get entry time
+        deals = mt5.history_deals_get(position=ticket)
+        if not deals:
+            continue
+        entry_time = pd.to_datetime(deals[0].time, unit='s')
+        
+        # Fetch candles from entry time to now (buffer: 100 bars)
+        rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
+        if rates is None or len(rates) == 0:
+            continue
+        candles = pd.DataFrame(rates)
+        candles['time'] = pd.to_datetime(candles['time'], unit='s')
+        
+        # Count consecutive profitable bars from the end (current streak)
+        consecutive_profit_bars = 0
+        for i in range(len(candles) - 1, -1, -1):  # Start from latest bar backward
+            candle = candles.iloc[i]
+            is_profitable = False
+            if direction == "BUY":
+                # Profitable if close > entry (simple) or low > entry (conservative)
+                is_profitable = candle['close'] > entry_price  # Or use candle['low'] > entry_price
+            else:  # SELL
+                is_profitable = candle['close'] < entry_price  # Or candle['high'] < entry_price
+            
+            if is_profitable:
+                consecutive_profit_bars += 1
+            else:
+                break  # Reset streak on non-profitable bar
+        
+        # Initialize or update tracking with bar count
+        if ticket not in profit_tracking:
+            profit_tracking[ticket] = {
+                'consecutive_bars': 0,
+                'breakeven_applied': False,
+                'symbol': symbol,
+                'timeframe': timeframe
+            }
+        
+        profit_tracking[ticket]['consecutive_bars'] = consecutive_profit_bars
+        
+        # Apply breakeven if streak >= required bars and not already applied
+        if (consecutive_profit_bars >= TIMEFRAME_PROFIT_BARS and 
+            not profit_tracking[ticket]['breakeven_applied']):
+            modify_trade_to_breakeven(symbol, ticket, entry_price)
+            profit_tracking[ticket]['breakeven_applied'] = True
+            print(f"⏰ Position {ticket} has {consecutive_profit_bars} consecutive profitable bars - applying breakeven")
+            send_telegram_message(f"⏰ {symbol} trade on {timeframe_to_str(timeframe)} has {consecutive_profit_bars} consecutive profitable bars - applying breakeven")
+
+# Update cleanup_profit_tracking to handle the new structure (no changes needed, as it deletes by ticket)
+
+# In monitor_breakeven_trades() and other places, check profit_tracking[ticket]['breakeven_applied'] as before
+'''

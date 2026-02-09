@@ -17,7 +17,7 @@ import shutil
 
 # === CONFIGURATION ===
 MT5_PATH = r"C:\Program Files\MetaTrader 5 Terminal\terminal64.exe"
-OUTPUT_FOLDER = str(Path.home() / "OneDrive - University of Ghana" / "Deriv_Comprehensive_Analysis")
+OUTPUT_FOLDER = str(Path.home() / "OneDrive - University of Ghana" / "visuals_Comprehensive_Analysis")
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
@@ -87,7 +87,7 @@ def get_trading_config():
     }
 
 def get_all_deals():
-    from_date = datetime(2026, 1, 13)
+    from_date = datetime(2026, 2, 5)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -106,7 +106,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2026, 1, 13)
+    from_date = datetime(2026, 2, 5)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:

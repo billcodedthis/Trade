@@ -1164,7 +1164,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
                         modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         continue
-                    if position.sl == position.price_open:
+                    if position.sl == position.price_open and position.volume< lot_size(symbol):
                         print(f"✅ Position {position.ticket} for {symbol} SL has already been modified")
                     else:
                         t = decimal_places(get_min_lot_size(symbol))
@@ -1231,7 +1231,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                             print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             continue
-                        if position.sl == position.price_open:
+                        if position.sl == position.price_open and position.volume< lot_size(symbol):
                             print(f"✅ Position {position.ticket} for {symbol} SL has already been modified")
                         else:
                             t = decimal_places(get_min_lot_size(symbol))
