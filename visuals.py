@@ -2017,69 +2017,90 @@ def check_extend_active_tp_from_higher_tf(symbol, direction, timeframe):
     return modified
 
 def update_profit_tracking():
-    """Update profit tracking for all active positions"""
+    """Update profit tracking using candle-based bar counts for all active positions"""
+    TIMEFRAME_PROFIT_BARS = 48
     TIMEFRAME_PROFIT_DURATIONS = {
         "M5": timedelta(minutes=240),    
         "M15": timedelta(minutes=720),     
         "H1": timedelta(hours=48),     
     }
+    DEFAULT_PROFIT_DURATION= timedelta(hours=48)
+    
     positions = mt5.positions_get()
     if positions is None:
         return
     
-    current_time = datetime.now()
-    
     for position in positions:
         ticket = position.ticket
-        timeframe = timeframe_to_str(position.magic)
-        DEFAULT_PROFIT_DURATION= timedelta(hours=2)
-        
-        # Get duration for this timeframe
-        required_duration = TIMEFRAME_PROFIT_DURATIONS.get(timeframe, DEFAULT_PROFIT_DURATION)
-
-        # Initialize tracking for new positions
-        if ticket not in profit_tracking:
-            profit_tracking[ticket] = {
-                'profit_time': None,
-                'in_profit': False,
-                'breakeven_applied': False
-            }
-        
-        # Get current profit
+        symbol = position.symbol
+        timeframe = position.magic  # Use the position's timeframe
+        direction = "BUY" if position.type == mt5.ORDER_TYPE_BUY else "SELL"
+        entry_price = position.price_open
         current_profit = position.profit
-        
-        if position.sl == position.price_open or profit_tracking[ticket]['breakeven_applied']:
+
+        if position.sl == entry_price:
             print(f"Position {ticket} has breakeven already applied")
             continue
+        if (position.type == mt5.ORDER_TYPE_BUY and position.sl > position.price_open) or \
+        (position.type == mt5.ORDER_TYPE_SELL and position.sl < position.price_open):
+            print(f"Position {ticket} has its SL already applied")
+            continue
 
-        # Check if in profit
-        if current_profit > 0:
-            # If just entered profit, record the time
-            if not profit_tracking[ticket]['in_profit']:
-                profit_tracking[ticket]['profit_time'] = current_time
-                profit_tracking[ticket]['in_profit'] = True
-                print(f"💰 Position {ticket} entered profit at {current_time.strftime('%H:%M:%S')}")
-            
-            # Check if required duration has passed since entering profit
-            if (profit_tracking[ticket]['profit_time'] is not None and 
-                not profit_tracking[ticket]['breakeven_applied']):
-                
-                time_in_profit = current_time - profit_tracking[ticket]['profit_time']
-                
-                if time_in_profit >= required_duration:
-                    # Apply breakeven
-                    modify_trade_to_breakeven(position.symbol, ticket, position.price_open)
-                    profit_tracking[ticket]['breakeven_applied'] = True
-                    hours = required_duration.total_seconds() / 3600
-                    print(f"⏰ Position {ticket} has been in profit for {hours:.1f} hours - applying breakeven")
-                    send_telegram_message(f"⏰ {position.symbol} trade on {timeframe} has been in profit for {hours:.1f} hours - applying breakeven")
+        required_duration = TIMEFRAME_PROFIT_DURATIONS.get(timeframe_to_str(timeframe), DEFAULT_PROFIT_DURATION)
         
-        else:
-            # No longer in profit - reset tracking
-            if profit_tracking[ticket]['in_profit']:
-                profit_tracking[ticket]['profit_time'] = None
-                profit_tracking[ticket]['in_profit'] = False
-                print(f"📉 Position {ticket} fell out of profit - resetting timer")
+        # Skip if not currently in profit (real-time check as gatekeeper)
+        if current_profit <= 0:
+            if ticket in profit_tracking:
+                del profit_tracking[ticket]  # Reset tracking if out of profit
+            continue
+        
+        # Get entry time
+        deals = mt5.history_deals_get(position=ticket)
+        if not deals:
+            continue
+        entry_time = pd.to_datetime(deals[0].time, unit='s')
+         
+        # Fetch candles from entry time to now (buffer: 100 bars)
+        rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
+        if rates is None or len(rates) == 0:
+            continue
+        candles = pd.DataFrame(rates)
+        candles['time'] = pd.to_datetime(candles['time'], unit='s')
+        
+        # Count consecutive profitable bars from the end (current streak)
+        consecutive_profit_bars = 0
+        for i in range(len(candles) - 1, -1, -1):  # Start from latest bar backward
+            candle = candles.iloc[i]
+            is_profitable = False
+            if direction == "BUY":
+                is_profitable = candle['low'] > entry_price  
+            else:  # SELL
+                is_profitable = candle['high'] < entry_price 
+            
+            if is_profitable:
+                consecutive_profit_bars += 1
+            else:
+                break  # Reset streak on non-profitable bar
+        
+        # Initialize or update tracking with bar count
+        if ticket not in profit_tracking:
+            profit_tracking[ticket] = {
+                'consecutive_bars': 0,
+                'breakeven_applied': False,
+                'symbol': symbol,
+                'timeframe': timeframe
+            }
+        
+        profit_tracking[ticket]['consecutive_bars'] = consecutive_profit_bars
+        
+        # Apply breakeven if streak >= required bars and not already applied
+        if (consecutive_profit_bars >= TIMEFRAME_PROFIT_BARS and 
+            not profit_tracking[ticket]['breakeven_applied']):
+            modify_trade_to_breakeven(symbol, ticket, entry_price)
+            profit_tracking[ticket]['breakeven_applied'] = True
+            hours = required_duration.total_seconds() / 3600
+            print(f"⏰ Position {ticket} has been in profit for {hours:.1f} hours - applying breakeven")
+            send_telegram_message(f"⏰ {symbol} trade on {timeframe_to_str(timeframe)} has been in profit for {hours:.1f} hours - applying breakeven")
 
 def cleanup_profit_tracking():
     """Remove completed trades from profit tracking"""
