@@ -69,9 +69,9 @@ def get_trading_config():
     US =["Wall Street 30.0"]
     
     return {
-        "H1_PENDING": Jump+J ,
+        "H1_PENDING": Jump ,
         "H1_INSTANT": [XAUUSD]+US,
-        "M15_PENDING": Jump+[XAUUSD]+v,
+        "M15_PENDING": [XAUUSD],
         "M15_INSTANT": J,
         "M5_PENDING": [BTCUSD],
         "M5_INSTANT": MAJORS+J

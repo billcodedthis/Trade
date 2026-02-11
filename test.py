@@ -28,18 +28,18 @@ J=["Jump 75 Index.0"]
 v=["Volatility 75 Index.0"]
 US =["Wall Street 30.0"]
 
-TIMEFRAME_H1 = [XAUUSD]+US+Jump+J
+TIMEFRAME_H1 = [XAUUSD]+US+Jump
 H1_B= [XAUUSD]+US
-H1_S=Jump+J
+H1_S=Jump
 H1_BS=[]
-H1_pen= Jump+J
+H1_pen= Jump
 H1_pl= [XAUUSD]+US
 
-TIMEFRAME_M15= [XAUUSD]+J+v
-M15_B= [XAUUSD]+v
+TIMEFRAME_M15= [XAUUSD]+J
+M15_B= [XAUUSD]
 M15_S=J
 M15_BS=[]
-M15_pen= Jump+[XAUUSD]+v
+M15_pen= [XAUUSD]
 M15_pl= J
 
 TIMEFRAME_M5= MAJORS+[BTCUSD]+J
