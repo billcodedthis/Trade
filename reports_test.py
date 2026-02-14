@@ -67,14 +67,19 @@ def get_trading_config():
     J=["Jump 75 Index.0"]
     v=["Volatility 75 Index.0"]
     US =["Wall Street 30.0"]
+    H1_S_I = ["CADCHF.0","EURGBP.0"]
+    H1_B_I = ["EURNZD.0"]
+    M5_B_I =["DSHUSD.0"]
+    M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 90 (1s) Index.0"]
+    M15_B_P = ["US Mid Cap 400.0"]
     
     return {
         "H1_PENDING": Jump ,
-        "H1_INSTANT": [XAUUSD]+US,
-        "M15_PENDING": [XAUUSD],
+        "H1_INSTANT": [XAUUSD]+US+H1_B_I+H1_S_I,
+        "M15_PENDING": [XAUUSD]+M15_B_P,
         "M15_INSTANT": J,
-        "M5_PENDING": [BTCUSD],
-        "M5_INSTANT": MAJORS+J
+        "M5_PENDING": [BTCUSD]+M5_S_P,
+        "M5_INSTANT": MAJORS+J+M5_B_I
     }
 
 def get_all_deals():

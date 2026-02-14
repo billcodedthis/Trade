@@ -27,27 +27,32 @@ Jump = ["Jump 25 Index.0"]
 J=["Jump 75 Index.0"]
 v=["Volatility 75 Index.0"]
 US =["Wall Street 30.0"]
+H1_S_I = ["CADCHF.0","EURGBP.0"]
+H1_B_I = ["EURNZD.0"]
+M5_B_I =["DSHUSD.0"]
+M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 90 (1s) Index.0"]
+M15_B_P = ["US Mid Cap 400.0"]
 
-TIMEFRAME_H1 = [XAUUSD]+US+Jump
-H1_B= [XAUUSD]+US
-H1_S=Jump
+TIMEFRAME_H1 = [XAUUSD]+US+Jump+H1_B_I+H1_S_I
+H1_B= [XAUUSD]+US+H1_B_I
+H1_S=Jump+H1_S_I
 H1_BS=[]
 H1_pen= Jump
-H1_pl= [XAUUSD]+US
+H1_pl= [XAUUSD]+US+H1_B_I+H1_S_I
 
-TIMEFRAME_M15= [XAUUSD]+J
-M15_B= [XAUUSD]
+TIMEFRAME_M15= [XAUUSD]+J+M15_B_P
+M15_B= [XAUUSD]+M15_B_P
 M15_S=J
 M15_BS=[]
-M15_pen= [XAUUSD]
+M15_pen= [XAUUSD]+M15_B_P
 M15_pl= J
 
-TIMEFRAME_M5= MAJORS+[BTCUSD]+J
-M5_S=J
-M5_B= MAJORS+[BTCUSD]
+TIMEFRAME_M5= MAJORS+[BTCUSD]+J+M5_S_P+M5_B_I
+M5_S=J+M5_S_P
+M5_B= MAJORS+[BTCUSD]+M5_B_I
 M5_BS= []
-M5_pen= [BTCUSD]
-M5_pl= MAJORS+J
+M5_pen= [BTCUSD]+M5_S_P
+M5_pl= MAJORS+J+M5_B_I
 
 active_channels = {}
 levels={}
@@ -2090,7 +2095,7 @@ def update_profit_tracking():
             profit_tracking[ticket]['breakeven_applied'] = True
             hours = required_duration.total_seconds() / 3600
             print(f"⏰ Position {ticket} has been in profit for {hours:.1f} hours - applying breakeven")
-            send_telegram_message(f"⏰ {symbol} trade on {timeframe_to_str(timeframe)} has been in profit for {hours:.1f} hours - applying breakeven")
+            send_telegram_message(f"⏰ {symbol} {direction} trade on {timeframe_to_str(timeframe)} has been in profit for {hours:.1f} hours - applying breakeven")
 
 def cleanup_profit_tracking():
     """Remove completed trades from profit tracking"""

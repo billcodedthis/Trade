@@ -1754,7 +1754,7 @@ def update_profit_tracking():
             profit_tracking[ticket]['breakeven_applied'] = True
             minutes = required_duration.total_seconds() / 60
             print(f"⏰ Position {ticket} has been in profit for {minutes:.1f} minutes - applying breakeven")
-            send_telegram_message(f"⏰ {symbol} trade on {timeframe_to_str(timeframe)} has been in profit for {minutes:.1f} minutes - applying breakeven")
+            send_telegram_message(f"⏰ {symbol} {direction} trade on {timeframe_to_str(timeframe)} has been in profit for {minutes:.1f} minutes - applying breakeven")
 
 def cleanup_profit_tracking():
     """Remove completed trades from profit tracking"""
