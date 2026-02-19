@@ -81,7 +81,7 @@ class SupplyDemandAnalyzer:
             # Count touches to this level
             touches = self.count_touches(data, zone_price, zone_type='supply')
             
-            if touches >= self.min_touches:
+            if touches >= self.min_touches and touches <= 20:
                 # Check if supply zone is broken (5 consecutive candles close above without touching)
                 is_broken = self.is_zone_broken(data, zone_price, zone_type='supply')
                 
@@ -101,7 +101,7 @@ class SupplyDemandAnalyzer:
             # Count touches to this level
             touches = self.count_touches(data, zone_price, zone_type='demand')
             
-            if touches >= self.min_touches:
+            if touches >= self.min_touches and touches <= 20:
                 # Check if demand zone is broken (5 consecutive candles close below without touching)
                 is_broken = self.is_zone_broken(data, zone_price, zone_type='demand')
                 
@@ -393,7 +393,7 @@ def analyze_symbols():
     
     # Timeframes to analyze
     #timeframes = [mt5.TIMEFRAME_H1, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M5]
-    timeframes = [mt5.TIMEFRAME_H4,mt5.TIMEFRAME_H1]
+    timeframes = [mt5.TIMEFRAME_M15,mt5.TIMEFRAME_H1]
     
     results = {}
     

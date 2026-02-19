@@ -68,22 +68,20 @@ def get_trading_config():
     v=["Volatility 75 Index.0"]
     US =["Wall Street 30.0"]
     H1_S_I = ["CADCHF.0","EURGBP.0"]
-    H1_B_I = ["EURNZD.0"]
-    M5_B_I =["DSHUSD.0"]
-    M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 90 (1s) Index.0"]
+    M5_S_P = ["Volatility 30 (1s) Index.0"]
     M15_B_P = ["US Mid Cap 400.0"]
     
     return {
         "H1_PENDING": Jump ,
-        "H1_INSTANT": [XAUUSD]+US+H1_B_I+H1_S_I,
+        "H1_INSTANT": [XAUUSD]+US+H1_S_I,
         "M15_PENDING": [XAUUSD]+M15_B_P,
         "M15_INSTANT": J,
         "M5_PENDING": [BTCUSD]+M5_S_P,
-        "M5_INSTANT": MAJORS+J+M5_B_I
+        "M5_INSTANT": MAJORS+J
     }
 
 def get_all_deals():
-    from_date = datetime(2026, 2, 8)
+    from_date = datetime(2026, 2, 20)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -102,7 +100,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2026, 2, 8)
+    from_date = datetime(2026, 2, 20)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:

@@ -122,7 +122,7 @@ class SupplyDemandAnalyzer:
             
             touches = self.count_touches(data, zone_price, zone_type='supply')
             
-            if touches >= self.min_touches:
+            if touches >= self.min_touches and touches <= 20:
                 is_broken = self.is_zone_broken(data, zone_price, zone_type='supply')
                 
                 supply_zones.append({
@@ -139,7 +139,7 @@ class SupplyDemandAnalyzer:
             
             touches = self.count_touches(data, zone_price, zone_type='demand')
             
-            if touches >= self.min_touches:
+            if touches >= self.min_touches and touches <= 20:
                 is_broken = self.is_zone_broken(data, zone_price, zone_type='demand')
                 
                 demand_zones.append({
@@ -847,7 +847,7 @@ def detect_regression_channel(df,symbol,timeframe):
     if validated:
         # Calculate trend slope for A+ setup check
         trend_slope = full_df['trend'].iloc[-1] - full_df['trend'].iloc[0]
-        a_plus_setup = check_a_plus_setup(symbol,full_df, trend_slope)
+        a_plus_setup = check_a_plus_setup(symbol,full_df, trend_slope,timeframe)
 
     return validated, full_df, a_plus_setup 
 
@@ -2165,6 +2165,8 @@ def monitor_active_trades():
                 msg = "hit TP"
             elif total_profit < 0:
                 msg = "hit SL"
+            else:
+                msg = "closed at breakeven"
             symbol = active_trades[ticket]['symbol']
             timeframe = active_trades[ticket]['timeframe']
             if msg == "hit SL":
@@ -2194,29 +2196,31 @@ def is_cooldown_active(symbol: str, timeframe: int) -> bool:
         return False
     return True
 
-def check_a_plus_setup(symbol,df, trend_slope):
+def check_a_plus_setup(symbol,df, trend_slope, current_timeframe):
     """
     Check if channel qualifies for A+ setup based on supply/demand zones
     Returns True if A+ setup is detected, False otherwise
     """
     global supply_demand_zones
     
+    key= (symbol,current_timeframe)
     # Get or calculate supply/demand zones for this symbol
-    if symbol not in supply_demand_zones:
-        supply_demand_zones[symbol] = {
-            'supply_zones': [],
-            'demand_zones': []
+    if key not in supply_demand_zones:
+        timeframe_map = {
+            mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],
+            mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],
+            mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]
         }
         
-        # Define higher timeframes for zone detection
-        higher_timeframes = [mt5.TIMEFRAME_H4, mt5.TIMEFRAME_H1]
+        higher_timeframes = timeframe_map.get(current_timeframe, [mt5.TIMEFRAME_H1])
+        
+        supply_demand_zones[key] = {'supply_zones': [], 'demand_zones': []}
         
         for ht in higher_timeframes:
             try:
                 # Fetch historical data from higher timeframe
                 historical_data = get_candles(symbol, ht, 200)  # More bars for better zone detection
                 if historical_data.empty:
-                    print(f"⚠️ No H1/H4 data for {symbol} on {timeframe_to_str(ht)}")
                     continue
                 
                 # Analyze zones for this higher timeframe
@@ -2224,16 +2228,16 @@ def check_a_plus_setup(symbol,df, trend_slope):
                 ht_supply_zones, ht_demand_zones = analyzer.identify_zones()
                 
                 # Add zones from this timeframe to the combined list
-                supply_demand_zones[symbol]['supply_zones'].extend(ht_supply_zones)
-                supply_demand_zones[symbol]['demand_zones'].extend(ht_demand_zones)
+                supply_demand_zones[key]['supply_zones'].extend(ht_supply_zones)
+                supply_demand_zones[key]['demand_zones'].extend(ht_demand_zones)
                 
-                print(f"✅ Found {len(ht_supply_zones)} supply zones and {len(ht_demand_zones)} demand zones for {symbol} on {timeframe_to_str(ht)}")
+                print(f"✅ Found {len(ht_supply_zones)} supply zones and {len(ht_demand_zones)} demand zones for {symbol} {timeframe_to_str(current_timeframe)} on {timeframe_to_str(ht)}")
                 
             except Exception as e:
                 print(f"❌ Error analyzing {symbol} on {timeframe_to_str(ht)}: {str(e)}")
                 continue
         
-    zones = supply_demand_zones[symbol]
+    zones = supply_demand_zones[key]
     # For downward channel (negative slope), check demand zones (support)
     if trend_slope < 0:
         for zone in zones['demand_zones']:
@@ -2290,25 +2294,38 @@ def check_a_plus_setup(symbol,df, trend_slope):
 
 def preload_supply_demand_zones():
     """
-    Preload supply/demand zones for all active symbols from H1 and H4 timeframes
+    Preload supply/demand zones for all active symbols using appropriate higher timeframes
     """
-    global supply_demand_zones
+    global supply_demand_zones, zone_last_loaded
     
     # Get all symbols from your configuration
     all_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5)
     
-    print("🔄 Preloading H1/H4 supply-demand zones for all symbols...")
+    # Define which higher timeframe to use for each trading timeframe
+    timeframe_map = {
+        mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],  # For M5 trades: Use M15 zones
+        mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],  # For M15 trades: Use H1 zones
+        mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]    # For H1 trades: Use H4 zones
+    }
+    
+    # Trading timeframes we actually use
+    trading_timeframes = [mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1]
+    
+    print("🔄 Preloading supply-demand zones for all timeframe combinations...")
     
     for symbol in all_symbols:
-        if symbol not in supply_demand_zones:
-            # Initialize empty zones for this symbol
-            supply_demand_zones[symbol] = {
-                'supply_zones': [],
-                'demand_zones': []
-            }
+        for trading_tf in trading_timeframes:
+            key = (symbol, trading_tf)
             
-            # Define higher timeframes for zone detection
-            higher_timeframes = [mt5.TIMEFRAME_H4, mt5.TIMEFRAME_H1]
+            # Initialize zones for this symbol/trading timeframe pair
+            if key not in supply_demand_zones:
+                supply_demand_zones[key] = {
+                    'supply_zones': [],
+                    'demand_zones': []
+                }
+            
+            # Get the higher timeframe(s) to analyze
+            higher_timeframes = timeframe_map.get(trading_tf, [mt5.TIMEFRAME_H1])
             
             for ht in higher_timeframes:
                 try:
@@ -2321,18 +2338,20 @@ def preload_supply_demand_zones():
                     analyzer = SupplyDemandAnalyzer(historical_data, lookback_period=15, min_touch_points=2)
                     ht_supply_zones, ht_demand_zones = analyzer.identify_zones()
                     
-                    # Add zones from this timeframe to the combined list
-                    supply_demand_zones[symbol]['supply_zones'].extend(ht_supply_zones)
-                    supply_demand_zones[symbol]['demand_zones'].extend(ht_demand_zones)
+                    # Add zones to the appropriate key
+                    supply_demand_zones[key]['supply_zones'].extend(ht_supply_zones)
+                    supply_demand_zones[key]['demand_zones'].extend(ht_demand_zones)
+                    
+                    print(f"✅ {symbol} ({timeframe_to_str(trading_tf)}): Found {len(ht_supply_zones)} supply, {len(ht_demand_zones)} demand zones on {timeframe_to_str(ht)}")
                     
                 except Exception as e:
                     print(f"❌ Error preloading zones for {symbol} on {timeframe_to_str(ht)}: {str(e)}")
                     continue
-            print(f"✅ Preloaded zones for {symbol}: {len(supply_demand_zones[symbol]['supply_zones'])} supply, {len(supply_demand_zones[symbol]['demand_zones'])} demand zones")
-            zone_last_loaded = datetime.now()
-            print(f"📅 Zones preloaded at: {zone_last_loaded.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"🔄 Next zones reload in: {ZONE_RELOAD_DAYS} days")
-
+    
+    zone_last_loaded = datetime.now()
+    print(f"📅 Zones preloaded at: {zone_last_loaded.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🔄 Next zones reload in: {ZONE_RELOAD_DAYS} days")
+ 
 def should_reload_zones():
     """
     Check if zones should be reloaded based on the 5-day schedule
