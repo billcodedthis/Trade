@@ -374,26 +374,29 @@ def analyze_symbols():
     """Analyze multiple symbols and timeframes for supply/demand zones"""
     
     # Define symbols and timeframes to analyze (same as test.py)
-    FOREX_PAIRS = ["EURUSD.0", "GBPUSD.0", "USDJPY.0", "CHFJPY.0",  "USDCHF.0","EURJPY.0"]
-    XAUUSD = "XAUUSD.0"
-    BTCUSD="BTCUSD.0"
-    MAJORS = [ "EURCHF.0", "CADCHF.0","GBPCAD.0","USDCAD.0"]
-    V100 = "Volatility 100 Index.0"
-    BnC = ["Boom 900 Index.0","Boom 300 Index.0"]
-    Jump = ["Jump 25 Index.0"]
-    vol = ["Volatility 50 Index.0","Volatility 25 Index.0","Volatility 10 Index.0"]
-    SYNTHETICS = ["Step Index.0"]
-    US =["US Tech 100.0","Wall Street 30.0"]
-    v=["Volatility 75 Index.0"]
-    J=["Jump 75 Index.0"]
-    C=["Crash 900 Index.0","Crash 300 Index.0"]
+    Basket_Indices= ['AUD Basket.0', 'EUR Basket.0', 'GBP Basket.0', 'Gold Basket.0', 'USD Basket.0']
+    Crash_Boom_Indices= ['Boom 1000 Index.0', 'Boom 150 Index.0', 'Boom 300 Index.0', 'Boom 500 Index.0', 'Boom 600 Index.0', 'Boom 900 Index.0', 'Crash 1000 Index.0', 'Crash 150 Index.0', 'Crash 300 Index.0', 'Crash 500 Index.0', 'Crash 600 Index.0', 'Crash 900 Index.0']
+    Crypto= ['ADAUSD.0', 'ALGUSD.0', 'AVAUSD.0', 'BATUSD.0', 'BCHUSD.0', 'BNBUSD.0', 'BTCETH.0', 'BTCLTC.0', 'BTCUSD.0', 'DOGUSD.0', 'DOTUSD.0', 'DSHUSD.0', 'ETCUSD.0', 'ETHUSD.0', 'IOTUSD.0', 'LNKUSD.0', 'LTCUSD.0', 'SOLUSD.0', 'UNIUSD.0', 'XLMUSD.0', 'XRPUSD.0', 'ZECUSD.0']
+    DEX_Indices= ['DEX 1500 DOWN Index.0', 'DEX 1500 UP Index.0', 'DEX 600 DOWN Index.0', 'DEX 600 UP Index.0', 'DEX 900 DOWN Index.0', 'DEX 900 UP Index.0']
+    Energies= ['UK Brent Oil.0', 'US Oil.0']
+    Forex_Major= ['AUDJPY.0', 'AUDUSD.0', 'EURAUD.0', 'EURCAD.0', 'EURCHF.0', 'EURGBP.0', 'EURJPY.0', 'EURUSD.0', 'GBPAUD.0', 'GBPJPY.0', 'GBPUSD.0', 'USDCAD.0', 'USDCHF.0', 'USDJPY.0']
+    Forex_Minor= ['AUDCAD.0', 'AUDCHF.0', 'AUDNZD.0', 'CADCHF.0', 'CADJPY.0', 'CHFJPY.0', 'EURNOK.0', 'EURNZD.0', 'EURPLN.0', 'EURSEK.0', 'GBPCAD.0', 'GBPCHF.0', 'GBPNOK.0', 'GBPNZD.0', 'GBPSEK.0', 'NZDCAD.0', 'NZDJPY.0', 'NZDUSD.0', 'USDCNH.0', 'USDMXN.0', 'USDNOK.0', 'USDPLN.0', 'USDSEK.0', 'USDZAR.0']
+    Jump_Indices= ['Jump 10 Index.0', 'Jump 100 Index.0', 'Jump 25 Index.0', 'Jump 50 Index.0', 'Jump 75 Index.0']
+    Metals= ['XAGEUR.0', 'XAGUSD.0', 'XAUEUR.0', 'XAUUSD.0', 'XPDUSD.0', 'XPTUSD.0']
+    Multi_Step_Indices= ['Multi Step 2 Index.0', 'Multi Step 3 Index.0', 'Multi Step 4 Index.0']
+    Range_Break= ['Range Break 100 Index.0', 'Range Break 200 Index.0']
+    Skewed_Step= ['Skew Step Index 4 Down.0', 'Skew Step Index 4 Up.0', 'Skew Step Index 5 Down.0', 'Skew Step Index 5 Up.0']
+    Step_Indices= ['Step Index 200.0', 'Step Index 300.0', 'Step Index 400.0', 'Step Index 500.0', 'Step Index.0']
+    Stock_Indices= ['Australia 200.0', 'China H Shares.0', 'Europe 50.0', 'France 40.0', 'Germany 40.0', 'Hong Kong 50.0', 'Japan 225.0', 'Netherlands 25.0', 'Spain 35.0', 'Swiss 20.0', 'UK 100.0', 'US Mid Cap 400.0', 'US SP 500.0', 'US Small Cap 2000.0', 'US Tech 100.0', 'Wall Street 30.0']
+    Volatility_Indices= ['Volatility 10 (1s) Index.0', 'Volatility 10 Index.0', 'Volatility 100 (1s) Index.0', 'Volatility 100 Index.0', 'Volatility 15 (1s) Index.0', 'Volatility 150 (1s) Index.0', 'Volatility 25 (1s) Index.0', 'Volatility 25 Index.0', 'Volatility 30 (1s) Index.0', 'Volatility 50 (1s) Index.0', 'Volatility 50 Index.0', 'Volatility 75 (1s) Index.0', 'Volatility 75 Index.0', 'Volatility 90 (1s) Index.0']
+
     
     # Combine all symbols
-    all_symbols = list(set(FOREX_PAIRS + [XAUUSD, BTCUSD] + MAJORS + [V100] + BnC + C + Jump + J + vol + v  + SYNTHETICS + US))
+    all_symbols = list(set(Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices))
     
     # Timeframes to analyze
     #timeframes = [mt5.TIMEFRAME_H1, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M5]
-    timeframes = [mt5.TIMEFRAME_M15,mt5.TIMEFRAME_H1]
+    timeframes = [mt5.TIMEFRAME_M15,mt5.TIMEFRAME_H1,mt5.TIMEFRAME_H4]
     
     results = {}
     

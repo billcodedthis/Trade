@@ -75,8 +75,14 @@ if not os.path.exists(PLOTS_FOLDER):
     os.makedirs(PLOTS_FOLDER)
 
 supply_demand_zones = {}  # Store zones for each symbol
-zone_last_loaded = None   # Track when zones were last loaded
-ZONE_RELOAD_DAYS = 5   
+to_be_reloaded=[]
+zone_last_loaded ={}
+ZONE_RELOAD_CONFIG = {
+        mt5.TIMEFRAME_M5: timedelta(hours=12),    # M5 zones reload every 12 hours
+        mt5.TIMEFRAME_M15: timedelta(days=1),      # M15 zones reload daily
+        mt5.TIMEFRAME_H1: timedelta(days=5),       # H1 zones reload every 5 days
+        mt5.TIMEFRAME_H4: timedelta(days=7),       # H4 zones reload weekly
+    } 
 
 class SupplyDemandAnalyzer:
     def __init__(self, data, lookback_period=20, min_touch_points=2):
@@ -2296,7 +2302,7 @@ def preload_supply_demand_zones():
     """
     Preload supply/demand zones for all active symbols using appropriate higher timeframes
     """
-    global supply_demand_zones, zone_last_loaded
+    global supply_demand_zones, zone_last_loaded,ZONE_RELOAD_CONFIG
     
     # Get all symbols from your configuration
     all_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5)
@@ -2348,29 +2354,89 @@ def preload_supply_demand_zones():
                     print(f"❌ Error preloading zones for {symbol} on {timeframe_to_str(ht)}: {str(e)}")
                     continue
     
-    zone_last_loaded = datetime.now()
-    print(f"📅 Zones preloaded at: {zone_last_loaded.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"🔄 Next zones reload in: {ZONE_RELOAD_DAYS} days")
+            # Update last loaded time for this key
+            zone_last_loaded[key] = datetime.now()
+            reload_period = ZONE_RELOAD_CONFIG.get(trading_tf, timedelta(days=5))
+            next_reload = zone_last_loaded[key] + reload_period
+            print(f"📅 {symbol} {timeframe_to_str(trading_tf)} zones loaded at: {zone_last_loaded[key].strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"🔄 Next zones reload at: {next_reload.strftime('%Y-%m-%d %H:%M:%S')}")
  
 def should_reload_zones():
     """
-    Check if zones should be reloaded based on the 5-day schedule
+    Check if zones should be reloaded based on the timeframe-specific schedule
     """
     global zone_last_loaded
+    global to_be_reloaded
     global supply_demand_zones
+    global ZONE_RELOAD_CONFIG
+
+    timeframe_map = {
+        mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],  # For M5 trades: Use M15 zones
+        mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],  # For M15 trades: Use H1 zones
+        mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]    # For H1 trades: Use H4 zones
+    }
     
-    if zone_last_loaded is None:
-        return True
+    # Clear to_be_reloaded list before checking
+    to_be_reloaded = []
     
-    time_since_last_load = datetime.now() - zone_last_loaded
-    days_since_last_load = time_since_last_load.days
+    # Check all zone_last_loaded keys
+    for key in list(zone_last_loaded.keys()):
+        symbol, timeframe = key
+        time_since_last_load = datetime.now() - zone_last_loaded[key]
+        
+        # Get reload period for this timeframe (default to 5 days if not specified)
+        reload_period = ZONE_RELOAD_CONFIG.get(timeframe, timedelta(days=5))
+        
+        if time_since_last_load >= reload_period:
+            to_be_reloaded.append(key)
+            if key in supply_demand_zones:
+                del supply_demand_zones[key]  # Clear existing zones
+                print(f"🗑️ Cleared expired zones for {symbol} on {timeframe_to_str(timeframe)}")
     
-    if days_since_last_load >= ZONE_RELOAD_DAYS:
-        print(f"🔄 Zones reload required: {days_since_last_load} days since last load")
-        supply_demand_zones={}
-        return True
+    # Reload zones for all keys in to_be_reloaded
+    for key in to_be_reloaded:
+        symbol, timeframe = key
+        
+        # Re-initialize zones for this key
+        if key not in supply_demand_zones:
+            supply_demand_zones[key] = {
+                'supply_zones': [],
+                'demand_zones': []
+            }
+        
+        # Get the higher timeframe(s) to analyze
+        higher_timeframes = timeframe_map.get(timeframe, [mt5.TIMEFRAME_H1])
+        
+        for ht in higher_timeframes:
+            try:
+                # Fetch historical data from higher timeframe
+                historical_data = get_candles(symbol, ht, 200)
+                if historical_data.empty:
+                    continue
+                
+                # Analyze zones for this higher timeframe
+                analyzer = SupplyDemandAnalyzer(historical_data, lookback_period=15, min_touch_points=2)
+                ht_supply_zones, ht_demand_zones = analyzer.identify_zones()
+                
+                # Add zones to the appropriate key
+                supply_demand_zones[key]['supply_zones'].extend(ht_supply_zones)
+                supply_demand_zones[key]['demand_zones'].extend(ht_demand_zones)
+                
+                print(f"✅ {symbol} ({timeframe_to_str(timeframe)}): Found {len(ht_supply_zones)} supply, {len(ht_demand_zones)} demand zones on {timeframe_to_str(ht)}")
+                
+            except Exception as e:
+                print(f"❌ Error reloading zones for {symbol} on {timeframe_to_str(ht)}: {str(e)}")
+                continue
+        
+        # Update last loaded time for this key after reload
+        zone_last_loaded[key] = datetime.now()
+        reload_period = ZONE_RELOAD_CONFIG.get(timeframe, timedelta(days=5))
+        next_reload = zone_last_loaded[key] + reload_period
+        print(f"📅 {symbol} {timeframe_to_str(timeframe)} zones reloaded at: {zone_last_loaded[key].strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"🔄 Next zones reload at: {next_reload.strftime('%Y-%m-%d %H:%M:%S')}")
     
-    return False
+    # Clear the to_be_reloaded list after processing
+    to_be_reloaded = []
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -2399,9 +2465,10 @@ while True:
             if not reconnected:
                 clear_plots_folder()
                 sys.exit("❌ Terminating script due to disconnection.")
-        if zone_last_loaded is None or should_reload_zones():
+        if len(supply_demand_zones)==0:
             print("🔄 Initializing supply/demand zones...")
             preload_supply_demand_zones()
+        should_reload_zones()
         clean_manual_deleted()
         monitor_breakeven_trades()
         monitor_active_trades()

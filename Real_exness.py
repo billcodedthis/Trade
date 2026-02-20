@@ -18,21 +18,7 @@ if not mt5.initialize(path=MT5_PATH):
     quit()
 else:
     print("✅ Successfully connected to MT5!")
-'''
-# Login to your Exness MT5 account
-account_number = 248191534  # Replace with your Exness MT5 account number
-password = input(f"Enter password for {account_number}: ")  # Replace with your actual password
-server = "Exness-MT5Trial"  # Change to "Exness-Real" if using a real account
 
-
-login_status = mt5.login(account_number, password, server)
-
-if login_status:
-    print("✅ Successfully connected to MT5!")
-else:
-    print("❌ Login failed. Check your credentials.")
-    quit()
-'''
 # Define symbols and timeframes
 XAUUSD = "XAUUSDm"
 Forex_Major= ['AUDJPYm', 'AUDUSDm', 'EURAUDm', 'EURCADm', 'EURCHFm', 'EURGBPm', 'EURJPYm', 'EURUSDm', 'GBPAUDm', 'GBPJPYm', 'GBPUSDm', 'USDCADm', 'USDCHFm', 'USDJPYm']
@@ -63,7 +49,7 @@ if not os.path.exists(PLOTS_FOLDER):
 
 supply_demand_zones = {}  # Store zones for each symbol
 zone_last_loaded = None   # Track when zones were last loaded
-ZONE_RELOAD_DAYS = 1  
+ZONE_RELOAD_HOURS = 12  
 
 class SupplyDemandAnalyzer:
     def __init__(self, data, lookback_period=20, min_touch_points=2):
@@ -2001,7 +1987,7 @@ def preload_supply_demand_zones():
     
     zone_last_loaded = datetime.now()
     print(f"📅 Zones preloaded at: {zone_last_loaded.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"🔄 Next zones reload in: {ZONE_RELOAD_DAYS} days")
+    print(f"🔄 Next zones reload in: {ZONE_RELOAD_HOURS} HOURS")
  
 def should_reload_zones():
     """
@@ -2014,10 +2000,10 @@ def should_reload_zones():
         return True
     
     time_since_last_load = datetime.now() - zone_last_loaded
-    days_since_last_load = time_since_last_load.days
+    hours_since_last_load = time_since_last_load.total_seconds() / 3600
     
-    if days_since_last_load >= ZONE_RELOAD_DAYS:
-        print(f"🔄 Zones reload required: {days_since_last_load} days since last load")
+    if hours_since_last_load >= ZONE_RELOAD_HOURS:
+        print(f"🔄 Zones reload required: {hours_since_last_load} hours since last load")
         supply_demand_zones={}
         return True
     
