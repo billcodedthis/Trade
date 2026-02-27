@@ -535,15 +535,18 @@ def update_channel_data(symbol,timeframe):
         return True
     else:
         df = active_channels[(symbol,timeframe)]["df"]
-        last = df.iloc[-num_bars:]
-        upper = df['upper'].iloc[-1]       # Access upper line from DataFrame
-        lower = df['lower'].iloc[-1]       # Access lower line from DataFrame
-        last_trend = df['trend']     
+        last = df.iloc[-num_bars:]  # Keep this to check recent candles
+        last_trend = df['trend']
         trend_slope = last_trend.iloc[-1] - last_trend.iloc[0]
+        
         for i in range(len(last)):
             candle = last.iloc[i]
-            broke_above = candle['high'] > upper
-            broke_below = candle['low'] < lower
+            # FIX: Use channel values at THIS candle's index, not the last one
+            upper_at_i = last['upper'].iloc[i]
+            lower_at_i = last['lower'].iloc[i]
+            
+            broke_above = candle['high'] > upper_at_i
+            broke_below = candle['low'] < lower_at_i
 
             if timeframe == mt5.TIMEFRAME_H1:
                 if symbol in H1_B:
@@ -867,10 +870,10 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
     for i in range(breakout_idx, len(df)):
         if df['open'].iloc[i] > df['upper'].iloc[i] or df['open'].iloc[i] < df['lower'].iloc[i]: 
             count+=1
-        if df['open'].iloc[i] > last_touch_price and df['high'].iloc[i] > df['upper'].iloc[i]: 
+        if df['open'].iloc[i] > last_touch_price and df['high'].iloc[i] > df['upper'].iloc[i] and last_touch_price>df['upper'].iloc[i]: 
             entry_candle_idx = i-1
             break
-        elif df['open'].iloc[i] < last_touch_price and df['low'].iloc[i] < df['lower'].iloc[i]: 
+        elif df['open'].iloc[i] < last_touch_price and df['low'].iloc[i] < df['lower'].iloc[i] and last_touch_price<df['lower'].iloc[i]: 
             entry_candle_idx = i-1
             break
         
@@ -2517,14 +2520,15 @@ while True:
                             }
                             df = active_channels[(symbol,timeframe)]["df"]
                             last = df.iloc[-10:]
-                            upper = df['upper'].iloc[-1]       # Access upper line from DataFrame
-                            lower = df['lower'].iloc[-1]       # Access lower line from DataFrame
                             last_trend = df['trend']     
                             trend_slope = last_trend.iloc[-1] - last_trend.iloc[0]
                             for i in range(len(last)):
                                 candle = last.iloc[i]
-                                broke_above = candle['high'] > upper
-                                broke_below = candle['low'] < lower
+                                upper_at_i = last['upper'].iloc[i]
+                                lower_at_i = last['lower'].iloc[i]
+                                
+                                broke_above = candle['high'] > upper_at_i
+                                broke_below = candle['low'] < lower_at_i
 
                                 # Breakout matches trend direction? Then delete
                                 if symbol in H1_B:
@@ -2603,14 +2607,15 @@ while True:
                             }
                             df = active_channels[(symbol,timeframe)]["df"]
                             last = df.iloc[-10:]
-                            upper = df['upper'].iloc[-1]       # Access upper line from DataFrame
-                            lower = df['lower'].iloc[-1]       # Access lower line from DataFrame
                             last_trend = df['trend']     
                             trend_slope = last_trend.iloc[-1] - last_trend.iloc[0]
                             for i in range(len(last)):
                                 candle = last.iloc[i]
-                                broke_above = candle['high'] > upper
-                                broke_below = candle['low'] < lower
+                                upper_at_i = last['upper'].iloc[i]
+                                lower_at_i = last['lower'].iloc[i]
+                                
+                                broke_above = candle['high'] > upper_at_i
+                                broke_below = candle['low'] < lower_at_i
 
                                 # Breakout matches trend direction? Then delete
                                 if symbol in M15_B:
@@ -2689,14 +2694,15 @@ while True:
                             }
                             df = active_channels[(symbol,timeframe)]["df"]
                             last = df.iloc[-10:]
-                            upper = df['upper'].iloc[-1]       # Access upper line from DataFrame
-                            lower = df['lower'].iloc[-1]       # Access lower line from DataFrame
                             last_trend = df['trend']     
                             trend_slope = last_trend.iloc[-1] - last_trend.iloc[0]
                             for i in range(len(last)):
                                 candle = last.iloc[i]
-                                broke_above = candle['high'] > upper
-                                broke_below = candle['low'] < lower
+                                upper_at_i = last['upper'].iloc[i]
+                                lower_at_i = last['lower'].iloc[i]
+                                
+                                broke_above = candle['high'] > upper_at_i
+                                broke_below = candle['low'] < lower_at_i
 
                                 # Breakout matches trend direction? Then delete
                                 if symbol in M5_B:
