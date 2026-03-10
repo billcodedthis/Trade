@@ -421,11 +421,17 @@ def analyze_completed_trades():
         net_profit = group['profit'].sum() + group['swap'].sum() + group['commission'].sum()
         net_profit = round(float(net_profit), 2)
         
+        exit_deals = group[group['entry'] == 1]
+        if exit_deals.empty:
+            continue
+        exit = exit_deals.iloc[-1]
+        last_sl = extract_tp1_from_comment(exit.get('comment', 0))
+        
         # Outcome & Reason
         if net_profit > 0:
             outcome = "WINNER"
             reason = "TP Hit"
-        elif net_profit < 0:
+        elif net_profit < 0 and (entry_price != last_sl):
             outcome = "LOSER"
             reason = "SL Hit"
         else:

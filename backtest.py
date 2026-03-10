@@ -2318,8 +2318,8 @@ if __name__ == "__main__":
     TEST_SYMBOLS = ALL_SYMBOLS[:1]  # Test first 5 symbols to start
     
     # Date range
-    START_DATE = datetime(2025, 1, 1)
-    END_DATE = datetime(2025, 2, 1)
+    START_DATE = datetime(2026, 1, 1)
+    END_DATE = datetime(2026, 2, 1)
     
     print(f"\nTest Configuration:")
     print(f"- Symbols: {len(TEST_SYMBOLS)} symbols (first 5)")

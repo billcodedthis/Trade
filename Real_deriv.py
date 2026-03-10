@@ -820,6 +820,13 @@ def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
         print(f"{symbol}, pending {direction}@{entry_price} sl:{sl},tp:{tp} failed: {order.comment}")
 
 def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
+    if is_time_restricted(symbol):
+        print(f"⛔ Weekend restriction: Not placing {direction} market trade for {symbol}")
+        if (symbol, timeframe) in active_channels:
+            del active_channels[(symbol,timeframe)]
+        if (symbol, timeframe) in levels:
+            del levels[(symbol,timeframe)]
+        return
     if abs(sl1 - entry_price) >= abs(tp - entry_price):
         print(f"🚫 Trade not placed: SL is greater than TP for {symbol}.")
         return

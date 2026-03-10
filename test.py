@@ -11,6 +11,7 @@ from pathlib import Path
 import signal
 import sys
 import requests
+import re
 
 MT5_PATH = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 if not mt5.initialize(path=MT5_PATH):
@@ -78,6 +79,43 @@ ZONE_RELOAD_CONFIG = {
         mt5.TIMEFRAME_H4: timedelta(days=7),       # H4 zones reload weekly
     }
 
+
+WEEKEND_RESTRICTION_START = 12  # 12:00 PM Friday
+WEEKEND_RESTRICTION_END = 12     # 12:00 PM Monday
+Forex_Major= ['AUDJPY.0', 'AUDUSD.0', 'EURAUD.0', 'EURCAD.0', 'EURCHF.0', 'EURGBP.0', 'EURJPY.0', 'EURUSD.0', 'GBPAUD.0', 'GBPJPY.0', 'GBPUSD.0', 'USDCAD.0', 'USDCHF.0', 'USDJPY.0']
+Forex_Minor= ['AUDCAD.0', 'AUDCHF.0', 'AUDNZD.0', 'CADCHF.0', 'CADJPY.0', 'CHFJPY.0', 'EURNOK.0', 'EURNZD.0', 'EURPLN.0', 'EURSEK.0', 'GBPCAD.0', 'GBPCHF.0', 'GBPNOK.0', 'GBPNZD.0', 'GBPSEK.0', 'NZDCAD.0', 'NZDJPY.0', 'NZDUSD.0', 'USDCNH.0', 'USDMXN.0', 'USDNOK.0', 'USDPLN.0', 'USDSEK.0', 'USDZAR.0']
+Metals= ['XAGEUR.0', 'XAGUSD.0', 'XAUEUR.0', 'XAUUSD.0', 'XPDUSD.0', 'XPTUSD.0']
+Energies= ['UK Brent Oil.0', 'US Oil.0']
+Basket_Indices= ['AUD Basket.0', 'EUR Basket.0', 'GBP Basket.0', 'Gold Basket.0', 'USD Basket.0']
+
+def is_time_restricted(symbol):
+    """
+    Check if trading should be restricted for this symbol based on weekend rules
+    Restricted: Friday 12:00 to Monday 06:00 for Forex, Metals, Energies, Basket Indices
+    """
+    # Get current time in local timezone
+    now = datetime.now()
+    
+    # Check if it's weekend (Friday after 12 PM or Saturday/Sunday or Monday before 6 AM)
+    if now.weekday() == 4:  # Friday
+        if now.hour >= WEEKEND_RESTRICTION_START:
+            # Check if symbol is in restricted categories
+            if (symbol in Forex_Major + Forex_Minor or 
+                symbol in Metals or 
+                symbol in Energies or 
+                symbol in Basket_Indices):
+                print(f"⛔ Weekend restriction: {symbol} blocked from {now.strftime('%A %H:%M')} (Friday after {WEEKEND_RESTRICTION_START}:00)")
+                return True
+    elif now.weekday() == 0:  # Monday
+        if now.hour < WEEKEND_RESTRICTION_END:
+            if (symbol in Forex_Major + Forex_Minor or 
+                symbol in Metals or 
+                symbol in Energies or 
+                symbol in Basket_Indices):
+                print(f"⛔ Weekend restriction: {symbol} blocked until {WEEKEND_RESTRICTION_END}:00 Monday")
+                return True
+    
+    return False
 
 class SupplyDemandAnalyzer:
     def __init__(self, data, lookback_period=20, min_touch_points=2):
@@ -870,12 +908,14 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
     for i in range(breakout_idx, len(df)):
         if df['open'].iloc[i] > df['upper'].iloc[i] or df['open'].iloc[i] < df['lower'].iloc[i]: 
             count+=1
-        if df['open'].iloc[i] > last_touch_price and df['high'].iloc[i] > df['upper'].iloc[i] and last_touch_price>df['upper'].iloc[i]: 
-            entry_candle_idx = i-1
-            break
+        if df['open'].iloc[i] > last_touch_price and df['high'].iloc[i] > df['upper'].iloc[i] and last_touch_price>df['upper'].iloc[i]:
+            if df['close'].iloc[i-2]> df['open'].iloc[i-2] :
+                entry_candle_idx = i-1
+                break
         elif df['open'].iloc[i] < last_touch_price and df['low'].iloc[i] < df['lower'].iloc[i] and last_touch_price<df['lower'].iloc[i]: 
-            entry_candle_idx = i-1
-            break
+            if df['close'].iloc[i-2]< df['open'].iloc[i-2] :
+                entry_candle_idx = i-1
+                break
         
     
     if count >= channel_data["num_bars"] and entry_candle_idx is None:
@@ -1018,6 +1058,13 @@ def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
     return levels[(symbol,timeframe)]
     
 def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
+    if is_time_restricted(symbol):
+        print(f"⛔ Weekend restriction: Not placing pending {direction} order for {symbol}")
+        if (symbol, timeframe) in active_channels:
+            del active_channels[(symbol,timeframe)]
+        if (symbol, timeframe) in levels:
+            del levels[(symbol,timeframe)]
+        return
     if abs(sl - sniper) >= abs(tp - sniper):
         print(f"🚫 pending Trade not placed: SL is greater than TP for {symbol}.")
         return
@@ -1058,6 +1105,13 @@ def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
         print(f"{symbol}, pending {direction}@{entry_price} sl:{sl},tp:{tp} failed: {order.comment}")
 
 def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
+    if is_time_restricted(symbol):
+        print(f"⛔ Weekend restriction: Not placing {direction} market trade for {symbol}")
+        if (symbol, timeframe) in active_channels:
+            del active_channels[(symbol,timeframe)]
+        if (symbol, timeframe) in levels:
+            del levels[(symbol,timeframe)]
+        return
     if abs(sl1 - entry_price) >= abs(tp - entry_price):
         print(f"🚫 Trade not placed: SL is greater than TP for {symbol}.")
         return
@@ -2128,11 +2182,21 @@ def monitor_breakeven_trades():
         deals = mt5.history_deals_get(position=ticket)
         if deals:
             first_deal = deals[0]
+            entry_price = first_deal.price
+            exit_deals = [d for d in deals if d.entry == 1]  # entry=1 means exit
+            last_sl = 0.0
+            if exit_deals:
+                last_exit = exit_deals[-1]
+                if last_exit.comment:
+                    try:
+                        last_sl = extract_price_from_comment(last_exit.comment)
+                    except ValueError:
+                        last_sl = 0.0
             direction = "BUY" if first_deal.type == mt5.DEAL_TYPE_BUY else "SELL"
             total_profit = sum(d.profit for d in deals)
             if total_profit > 0:
                 msg = "hit TP"
-            elif total_profit < 0:
+            elif total_profit < 0 and (entry_price!=last_sl):
                 msg = "hit SL"
             else:
                 msg = "closed at breakeven"
@@ -2163,11 +2227,21 @@ def monitor_active_trades():
         deals = mt5.history_deals_get(position=ticket)
         if deals:
             first_deal = deals[0]
+            entry_price = first_deal.price
+            exit_deals = [d for d in deals if d.entry == 1]  # entry=1 means exit
+            last_sl = 0.0
+            if exit_deals:
+                last_exit = exit_deals[-1]
+                if last_exit.comment:
+                    try:
+                        last_sl = extract_price_from_comment(last_exit.comment)
+                    except ValueError:
+                        last_sl = 0.0
             direction = "BUY" if first_deal.type == mt5.DEAL_TYPE_BUY else "SELL"
             total_profit = sum(d.profit for d in deals)
             if total_profit > 0:
                 msg = "hit TP"
-            elif total_profit < 0:
+            elif total_profit < 0 and (entry_price!=last_sl):
                 msg = "hit SL"
             else:
                 msg = "closed at breakeven"
@@ -2435,6 +2509,18 @@ def should_reload_zones():
     
     # Clear the to_be_reloaded list after processing
     to_be_reloaded = []
+
+def extract_price_from_comment(comment):
+    """Extract price from comment field (TP1 or SL)"""
+    if not comment:
+        return None
+    try:
+        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", str(comment))
+        if numbers:
+            return float(numbers[0])
+    except (ValueError, TypeError):
+        pass
+    return None
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
