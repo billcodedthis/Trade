@@ -61,18 +61,19 @@ TIMEFRAMES = {
 # Trading configuration from visuals.py
 def get_trading_config():
     XAUUSD = "XAUUSDm"
+    BTCUSD = "BTCUSDm"
     Forex_Major= ['AUDJPYm', 'AUDUSDm', 'EURAUDm', 'EURCADm', 'EURCHFm', 'EURGBPm', 'EURJPYm', 'EURUSDm', 'GBPAUDm', 'GBPJPYm', 'GBPUSDm', 'USDCADm', 'USDCHFm', 'USDJPYm']
     Forex_Minor= ['AUDCADm', 'AUDCHFm', 'AUDNZDm', 'CADCHFm', 'CADJPYm', 'CHFJPYm', 'EURNZDm', 'GBPCADm', 'GBPCHFm', 'GBPNZDm', 'NZDCADm', 'NZDJPYm', 'NZDUSDm']
 
     
     
     return {
-        "M1_PENDING": [XAUUSD]+Forex_Major+Forex_Minor ,
+        "M1_PENDING": [XAUUSD,BTCUSD]+Forex_Major+Forex_Minor ,
         "M1_INSTANT": []
     }
 
 def get_all_deals():
-    from_date = datetime(2026, 2, 21)
+    from_date = datetime(2026, 3, 11)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -91,7 +92,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2026, 2, 21)
+    from_date = datetime(2026, 3, 11)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:

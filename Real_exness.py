@@ -22,15 +22,16 @@ else:
 
 # Define symbols and timeframes
 XAUUSD = "XAUUSDm"
+BTCUSD = "BTCUSDm"
 Forex_Major= ['AUDJPYm', 'AUDUSDm', 'EURAUDm', 'EURCADm', 'EURCHFm', 'EURGBPm', 'EURJPYm', 'EURUSDm', 'GBPAUDm', 'GBPJPYm', 'GBPUSDm', 'USDCADm', 'USDCHFm', 'USDJPYm']
 Forex_Minor= ['AUDCADm', 'AUDCHFm', 'AUDNZDm', 'CADCHFm', 'CADJPYm', 'CHFJPYm', 'EURNZDm', 'GBPCADm', 'GBPCHFm', 'GBPNZDm', 'NZDCADm', 'NZDJPYm', 'NZDUSDm']
 
 
-TIMEFRAME_M1= [XAUUSD]+Forex_Major+Forex_Minor
+TIMEFRAME_M1= [XAUUSD,BTCUSD]+Forex_Major+Forex_Minor
 M1_B= []
 M1_S=[]
-M1_BS= [XAUUSD]+Forex_Major+Forex_Minor
-M1_pen= [XAUUSD]+Forex_Major+Forex_Minor
+M1_BS= [XAUUSD,BTCUSD]+Forex_Major+Forex_Minor
+M1_pen= [XAUUSD,BTCUSD]+Forex_Major+Forex_Minor
 M1_pl= []
 
 active_channels = {}
@@ -823,6 +824,7 @@ def detect_regression_channel(df,symbol,timeframe):
     return validated, full_df, a_plus_setup 
 
 def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
+    not_valid_entry=False
     if last_touch_idx is None or breakout_idx is None:
         return None
         
@@ -839,14 +841,26 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
         if df['open'].iloc[i] > df['upper'].iloc[i] or df['open'].iloc[i] < df['lower'].iloc[i]: 
             count+=1
         if df['open'].iloc[i] > last_touch_price and df['high'].iloc[i] > df['upper'].iloc[i] and last_touch_price>df['upper'].iloc[i]:
-            if df['close'].iloc[i-2]> df['open'].iloc[i-2] :
+            if df['close'].iloc[i-2]> df['open'].iloc[i-2]  and df['close'].iloc[i-1] > last_touch_price and df['open'].iloc[i-1] < last_touch_price:
                 entry_candle_idx = i-1
                 break
+            else:
+                not_valid_entry=True
         elif df['open'].iloc[i] < last_touch_price and df['low'].iloc[i] < df['lower'].iloc[i] and last_touch_price<df['lower'].iloc[i]: 
-            if df['close'].iloc[i-2]< df['open'].iloc[i-2] :
+            if df['close'].iloc[i-2]< df['open'].iloc[i-2] and df['close'].iloc[i-1] < last_touch_price and df['open'].iloc[i-1] > last_touch_price:
                 entry_candle_idx = i-1
                 break
+            else:
+                not_valid_entry=True
         
+    
+    if not_valid_entry:
+        print(f"{symbol} {timeframe}channel didn't meet the entry criteria")
+        if (symbol, timeframe) in active_channels:
+            del active_channels[(symbol,timeframe)]
+        if (symbol, timeframe) in levels:
+            del levels[(symbol,timeframe)]
+        return None
     
     if count >= channel_data["num_bars"] and entry_candle_idx is None:
             print(f"{symbol} {timeframe}channel has kept too long after breakout.Deleting channel")
