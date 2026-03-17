@@ -103,15 +103,22 @@ def is_time_restricted(symbol):
             if (symbol in Forex_Major + Forex_Minor or 
                 symbol in Metals or 
                 symbol in Energies or 
-                symbol in Basket_Indices):
+                symbol in Basket_Indices+Stock_Indices):
                 print(f"⛔ Weekend restriction: {symbol} blocked from {now.strftime('%A %H:%M')} (Friday after {WEEKEND_RESTRICTION_START}:00)")
                 return True
+    elif now.weekday() == 6:  # Sunday
+        if (symbol in Forex_Major + Forex_Minor or 
+                symbol in Metals or 
+                symbol in Energies or 
+                symbol in Basket_Indices+Stock_Indices):
+            print(f"⛔ Weekend restriction: {symbol} blocked until {WEEKEND_RESTRICTION_END}:00 Monday")
+            return True
     elif now.weekday() == 0:  # Monday
         if now.hour < WEEKEND_RESTRICTION_END:
             if (symbol in Forex_Major + Forex_Minor or 
                 symbol in Metals or 
                 symbol in Energies or 
-                symbol in Basket_Indices):
+                symbol in Basket_Indices+Stock_Indices):
                 print(f"⛔ Weekend restriction: {symbol} blocked until {WEEKEND_RESTRICTION_END}:00 Monday")
                 return True
     
@@ -945,6 +952,20 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
     
     last_trend = df["trend"]
     trend_slope = last_trend.iloc[-1] - last_trend.iloc[0]
+    
+    broken =0
+    for i in range(breakout_idx, entry_candle_idx-1):
+        if trend_slope<0 and df['high'].iloc[i] > last_touch_price:
+            broken+=1
+        elif trend_slope>0  and df['low'].iloc[i] < last_touch_price:
+            broken+=1
+    if broken >=1 :
+        print(f"{symbol} {timeframe}channel didn't meet the entry criteria")
+        if (symbol, timeframe) in active_channels:
+            del active_channels[(symbol,timeframe)]
+        if (symbol, timeframe) in levels:
+            del levels[(symbol,timeframe)]
+        return None
 
     count = 0
     for j in range(entry_candle_idx + 1, min(entry_candle_idx + 6, len(df))):
@@ -2663,6 +2684,8 @@ while True:
                             continue
                         if entry_idx:
                             fib_levels = apply_fibonacci_levels(symbol,entry_idx, candles,timeframe)
+                            if (symbol, timeframe) not in active_channels:
+                                continue
                             if fib_levels:
                                     direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
                                     if symbol in H1_pen :
@@ -2749,6 +2772,8 @@ while True:
                             continue
                         if entry_idx:
                             fib_levels = apply_fibonacci_levels(symbol,entry_idx, candles,timeframe)
+                            if (symbol, timeframe) not in active_channels:
+                                continue
                             if fib_levels:
                                     direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
                                     if symbol in M15_pen :
@@ -2835,6 +2860,8 @@ while True:
                             continue
                         if entry_idx:
                             fib_levels = apply_fibonacci_levels(symbol,entry_idx, candles,timeframe)
+                            if (symbol, timeframe) not in active_channels:
+                                continue
                             if fib_levels:
                                     direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
                                     if symbol in M5_pen :

@@ -91,6 +91,7 @@ Forex_Minor= ['AUDCAD.0', 'AUDCHF.0', 'AUDNZD.0', 'CADCHF.0', 'CADJPY.0', 'CHFJP
 Metals= ['XAGEUR.0', 'XAGUSD.0', 'XAUEUR.0', 'XAUUSD.0', 'XPDUSD.0', 'XPTUSD.0']
 Energies= ['UK Brent Oil.0', 'US Oil.0']
 Basket_Indices= ['AUD Basket.0', 'EUR Basket.0', 'GBP Basket.0', 'Gold Basket.0', 'USD Basket.0']
+Stock_Indices= ['Australia 200', 'China H Shares', 'Europe 50', 'France 40', 'Germany 40', 'Hong Kong 50', 'Japan 225', 'Netherlands 25', 'Spain 35', 'Swiss 20', 'UK 100', 'US Mid Cap 400', 'US SP 500', 'US Small Cap 2000', 'US Tech 100', 'Wall Street 30']
 
 def is_time_restricted(symbol):
     """
@@ -107,15 +108,22 @@ def is_time_restricted(symbol):
             if (symbol in Forex_Major + Forex_Minor or 
                 symbol in Metals or 
                 symbol in Energies or 
-                symbol in Basket_Indices):
+                symbol in Basket_Indices+Stock_Indices):
                 print(f"⛔ Weekend restriction: {symbol} blocked from {now.strftime('%A %H:%M')} (Friday after {WEEKEND_RESTRICTION_START}:00)")
                 return True
+    elif now.weekday() == 6:  # Sunday
+        if (symbol in Forex_Major + Forex_Minor or 
+                symbol in Metals or 
+                symbol in Energies or 
+                symbol in Basket_Indices+Stock_Indices):
+            print(f"⛔ Weekend restriction: {symbol} blocked until {WEEKEND_RESTRICTION_END}:00 Monday")
+            return True
     elif now.weekday() == 0:  # Monday
         if now.hour < WEEKEND_RESTRICTION_END:
             if (symbol in Forex_Major + Forex_Minor or 
                 symbol in Metals or 
                 symbol in Energies or 
-                symbol in Basket_Indices):
+                symbol in Basket_Indices+Stock_Indices):
                 print(f"⛔ Weekend restriction: {symbol} blocked until {WEEKEND_RESTRICTION_END}:00 Monday")
                 return True
     
@@ -948,7 +956,21 @@ def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
     
     last_trend = df["trend"]
     trend_slope = last_trend.iloc[-1] - last_trend.iloc[0]
-
+    
+    broken =0
+    for i in range(breakout_idx, entry_candle_idx-1):
+        if trend_slope<0 and df['high'].iloc[i] > last_touch_price:
+            broken+=1
+        elif trend_slope>0  and df['low'].iloc[i] < last_touch_price:
+            broken+=1
+    if broken >=1 :
+        print(f"{symbol} {timeframe}channel didn't meet the entry criteria")
+        if (symbol, timeframe) in active_channels:
+            del active_channels[(symbol,timeframe)]
+        if (symbol, timeframe) in levels:
+            del levels[(symbol,timeframe)]
+        return None
+    
     count = 0
     for j in range(entry_candle_idx + 1, min(entry_candle_idx + 6, len(df))):
         if trend_slope<0 and (df['close'].iloc[j] > df['close'].iloc[entry_candle_idx] and df['low'].iloc[j] > df['low'].iloc[entry_candle_idx]) :
@@ -1039,6 +1061,24 @@ def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
     # Get the swing point (low for buys, high for sells)
     is_buy = df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx]
     swing_point = df['low'].iloc[last_opposite_idx] if is_buy else df['high'].iloc[last_opposite_idx]
+
+    for i in range(last_opposite_idx+1,entry_idx+1):
+        if is_buy:
+            if df['low'].iloc[i] < swing_point:
+                print(f"{symbol} {timeframe}channel didn't meet the entry criteria")
+                if (symbol, timeframe) in active_channels:
+                    del active_channels[(symbol,timeframe)]
+                if (symbol, timeframe) in levels:
+                    del levels[(symbol,timeframe)]
+                return None
+        else:
+            if df['high'].iloc[i] > swing_point:
+                print(f"{symbol} {timeframe}channel didn't meet the entry criteria")
+                if (symbol, timeframe) in active_channels:
+                    del active_channels[(symbol,timeframe)]
+                if (symbol, timeframe) in levels:
+                    del levels[(symbol,timeframe)]
+                return None 
     
     # Calculate risk (distance from entry to swing point)
     risk = abs(entry_price - swing_point)
@@ -2665,6 +2705,8 @@ while True:
                             continue
                         if entry_idx:
                             fib_levels = apply_fibonacci_levels(symbol,entry_idx, candles,timeframe)
+                            if (symbol, timeframe) not in active_channels:
+                                continue
                             if fib_levels:
                                     direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
                                     if symbol in H1_pen :
@@ -2752,6 +2794,8 @@ while True:
                             continue
                         if entry_idx:
                             fib_levels = apply_fibonacci_levels(symbol,entry_idx, candles,timeframe)
+                            if (symbol, timeframe) not in active_channels:
+                                continue
                             if fib_levels:
                                     direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
                                     if symbol in M15_pen :
@@ -2839,6 +2883,8 @@ while True:
                             continue
                         if entry_idx:
                             fib_levels = apply_fibonacci_levels(symbol,entry_idx, candles,timeframe)
+                            if (symbol, timeframe) not in active_channels:
+                                continue
                             if fib_levels:
                                     direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
                                     if symbol in M5_pen :
