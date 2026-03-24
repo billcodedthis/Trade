@@ -28,12 +28,9 @@ J=["Jump 75 Index.0"]
 v=["Volatility 75 Index.0"]
 US =["Wall Street 30.0"]
 H1_S_I = ["CADCHF.0","EURGBP.0"]
-M5_B_I = ["Boom 500 Index.0","DEX 600 UP Index.0","GBPAUD.0","GBPSEK.0","Jump 25 Index.0","Multi Step 3 Index.0","NZDUSD.0","Volatility 25 (1s) Index.0"]
-M15_B_I = ["Volatility 15 (1s) Index.0"]
-M15_S_I = ["NZDJPY.0"]
-M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 25 (1s) Index.0","Volatility 75 (1s) Index.0","Volatility 30 (1s) Index.0","Gold Basket.0","BCHUSD.0"]
+M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 25 (1s) Index.0","Volatility 75 (1s) Index.0","Volatility 30 (1s) Index.0","Gold Basket.0"]
 M5_B_P=["Boom 300 Index.0","Jump 100 Index.0","Hong Kong 50.0"]
-M15_B_P = ["Volatility 100 (1s) Index.0","BTCETH.0"]
+M15_B_P = ["Volatility 100 (1s) Index.0"]
 M15_S_P = ["Step Index 300.0"]
 
 TIMEFRAME_H1 = [XAUUSD]+US+Jump+H1_S_I
@@ -43,19 +40,19 @@ H1_BS=[]
 H1_pen= Jump
 H1_pl= [XAUUSD]+US+H1_S_I
 
-TIMEFRAME_M15= [XAUUSD]+J+M15_B_P+M15_S_P+M15_B_I+M15_S_I
-M15_B= M15_B_P+M15_B_I
-M15_S=J+M15_S_P+M15_S_I
+TIMEFRAME_M15= [XAUUSD]+J+M15_B_P+M15_S_P
+M15_B= M15_B_P
+M15_S=J+M15_S_P
 M15_BS=[XAUUSD]
 M15_pen= [XAUUSD]+M15_B_P+M15_S_P
-M15_pl= J+M15_S_I+M15_B_I
+M15_pl= J
 
-TIMEFRAME_M5= [XAUUSD]+J+M5_S_P+v+M5_B_P+M5_B_I
+TIMEFRAME_M5= [XAUUSD]+J+M5_S_P+v+M5_B_P
 M5_S=J+M5_S_P+[XAUUSD]
-M5_B= M5_B_P+M5_B_I
+M5_B= M5_B_P
 M5_BS= v
 M5_pen= [XAUUSD]+M5_S_P+v+M5_B_P
-M5_pl= J+M5_B_I
+M5_pl= J
 
 active_channels = {}
 levels={}
@@ -1112,7 +1109,76 @@ def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
         }
     
     return levels[(symbol,timeframe)]
-    
+
+def get_lot_step(symbol):
+    info = mt5.symbol_info(symbol)
+    if info:
+        return info.volume_step
+    else:
+        return None
+
+def adjust_lot_for_risk(symbol, direction, entry_price, sl, initial_volume):
+    """Adjust lot size to ensure risk <= 5% of balance."""
+    balance = mt5.account_info().balance
+    if balance <= 0:
+        print(f"❌ Account balance is {balance}. Cannot place trade.")
+        return None
+
+    min_lot = get_min_lot_size(symbol)
+    lot_step = get_lot_step(symbol)
+    if min_lot is None or lot_step is None:
+        print(f"❌ Could not get symbol info for {symbol}.")
+        return None
+
+    volume = initial_volume
+    order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+
+    while volume > min_lot:
+        # Calculate hypothetical profit (negative for loss)
+        profit = mt5.order_calc_profit(order_type, symbol, volume, entry_price, sl)
+        if profit is None:
+            print(f"❌ Failed to calculate profit for {symbol}.")
+            return None
+
+        loss = abs(profit)  # Loss is positive value
+        risk_pct = (loss / balance) * 100
+        
+
+        if 2 <=risk_pct <= 5:
+            # Round down to nearest step
+            volume = (volume // lot_step) * lot_step
+            if volume < min_lot:
+                volume = min_lot
+            return volume
+        
+        elif risk_pct < 2:
+            volume *= 2
+            volume = max((volume // lot_step) * lot_step, min_lot)
+
+        elif risk_pct >5:
+            volume /= 2
+            volume = max((volume // lot_step) * lot_step, min_lot)
+
+    if volume == min_lot:
+        profit = mt5.order_calc_profit(order_type, symbol, volume, entry_price, sl)
+        if profit is None:
+            print(f"❌ Failed to calculate profit for {symbol}.")
+            return None
+
+        loss = abs(profit)  # Loss is positive value
+        risk_pct = (loss / balance) * 100
+        
+
+        if 2 <=risk_pct <= 5:
+            # Round down to nearest step
+            volume = (volume // lot_step) * lot_step
+            if volume < min_lot:
+                volume = min_lot
+            return volume
+
+    print(f"🚫 Risk still exceeds 2-5% at minimum lot size for {symbol}. Skipping trade.")
+    return None
+
 def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
     if is_time_restricted(symbol):
         print(f"⛔ Weekend restriction: Not placing pending {direction} order for {symbol}")
@@ -1135,10 +1201,16 @@ def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
             if timeframe == position.magic:
                 print(f"🚫 pending Trade not placed: An open position already exists for {symbol}.")
                 return
+    initial_lot = lot_size(symbol)
+    adjusted_volume = adjust_lot_for_risk(symbol, direction, sniper, sl, initial_lot)
+    if adjusted_volume is None:
+        print(f"🚫 Skipping pending trade for {symbol}: Risk exceeds 2-5% even at min lot.")
+        return
+    
     request1 = {
             "action": mt5.TRADE_ACTION_PENDING,
             "symbol": symbol,
-            "volume": lot_size(symbol) ,
+            "volume": adjusted_volume ,
             "type": mt5.ORDER_TYPE_BUY_LIMIT if direction == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT,
             "price": sniper,
             "sl": sl,
@@ -1177,10 +1249,15 @@ def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
             if timeframe==position.magic:
                 print(f"🚫 Trade not placed: An open position already exists for {symbol}.")
                 return
+    initial_lot = lot_size(symbol)
+    adjusted_volume = adjust_lot_for_risk(symbol, direction, entry_price, sl1, initial_lot)
+    if adjusted_volume is None:
+        print(f"🚫 Skipping market trade for {symbol}: Risk exceeds 2-5% even at min lot.")
+        return
     request = {
         "action": mt5.TRADE_ACTION_DEAL ,
         "symbol": symbol,
-        "volume": lot_size(symbol) ,
+        "volume": adjusted_volume ,
         "type": mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL,
         "price": entry_price,
         "sl": sl1,
@@ -1302,7 +1379,17 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 direction = "SELL" if position.type == mt5.ORDER_TYPE_SELL else "BUY"
                 entry_time = pd.to_datetime(position.time, unit='s')
                 
+                deals = mt5.history_deals_get(position=position.ticket)
+                if not deals:
+                    continue
 
+                # Find the opening deal (entry == 0)
+                open_deals = [d for d in deals if d.entry == 0]
+                if not open_deals:
+                    continue
+                initial_volume = open_deals[0].volume
+                print(initial_volume)
+                
                 rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
                 if rates is None or len(rates) == 0:
                     continue
@@ -1322,7 +1409,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                     if position.volume == get_min_lot_size(symbol):
                         modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         continue
-                    if position.volume <= (lot_size(symbol)/ 2):
+                    if position.volume <= (initial_volume/ 2):
                         print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
                         modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         continue
@@ -1369,6 +1456,17 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 entry_time = pd.to_datetime(position.time, unit='s')
                 
 
+                deals = mt5.history_deals_get(position=position.ticket)
+                if not deals:
+                    continue
+
+                # Find the opening deal (entry == 0)
+                open_deals = [d for d in deals if d.entry == 0]
+                if not open_deals:
+                    continue
+                initial_volume = open_deals[0].volume
+                print(initial_volume)
+                
                 rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
                 if rates is None or len(rates) == 0:
                     continue
@@ -1389,7 +1487,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         if position.volume == get_min_lot_size(symbol):
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             continue
-                        if position.volume <= (lot_size(symbol)/ 2):
+                        if position.volume <= (initial_volume/ 2):
                             print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             continue
@@ -1673,7 +1771,7 @@ def handle_engulfing_patterns():
                         if count == 1:
                             if pos.volume > min_lot:
                                 t = decimal_places(get_min_lot_size(symbol))
-                                half = round(pos.volume / 2, t)
+                                half = round(pos.volume / 1.5, t)
                                 current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
@@ -1699,7 +1797,7 @@ def handle_engulfing_patterns():
                         elif count >= 2 :
                             if pos.volume > min_lot:
                                 t = decimal_places(get_min_lot_size(symbol))
-                                half = round(pos.volume / 2, t)
+                                half = round(pos.volume / 1.5, t)
                                 current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
@@ -1773,7 +1871,7 @@ def handle_engulfing_patterns():
                     if count == 1:
                         if pos.volume > min_lot:
                             t = decimal_places(get_min_lot_size(symbol))
-                            half = round(pos.volume / 2, t)
+                            half = round(pos.volume / 1.5, t)
                             current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {
@@ -1799,7 +1897,7 @@ def handle_engulfing_patterns():
                     elif count >= 2:
                         if pos.volume > min_lot:
                             t = decimal_places(get_min_lot_size(symbol))
-                            half = round(pos.volume / 2, t)
+                            half = round(pos.volume / 1.5, t)
                             current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {

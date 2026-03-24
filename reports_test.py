@@ -67,25 +67,22 @@ def get_trading_config():
     v=["Volatility 75 Index.0"]
     US =["Wall Street 30.0"]
     H1_S_I = ["CADCHF.0","EURGBP.0"]
-    M5_B_I = ["Boom 500 Index.0","DEX 600 UP Index.0","GBPAUD.0","GBPSEK.0","Jump 25 Index.0","Multi Step 3 Index.0","NZDUSD.0","Volatility 25 (1s) Index.0"]
-    M15_B_I = ["Volatility 15 (1s) Index.0"]
-    M15_S_I = ["NZDJPY.0"]
-    M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 25 (1s) Index.0","Volatility 75 (1s) Index.0","Volatility 30 (1s) Index.0","Gold Basket.0","BCHUSD.0"]
+    M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 25 (1s) Index.0","Volatility 75 (1s) Index.0","Volatility 30 (1s) Index.0","Gold Basket.0"]
     M5_B_P=["Boom 300 Index.0","Jump 100 Index.0","Hong Kong 50.0"]
-    M15_B_P = ["Volatility 100 (1s) Index.0","BTCETH.0"]
+    M15_B_P = ["Volatility 100 (1s) Index.0"]
     M15_S_P = ["Step Index 300.0"]
     
     return {
         "H1_PENDING": Jump ,
         "H1_INSTANT": [XAUUSD]+US+H1_S_I,
         "M15_PENDING": [XAUUSD]+M15_B_P+M15_S_P,
-        "M15_INSTANT": J+M15_S_I+M15_B_I,
+        "M15_INSTANT": J,
         "M5_PENDING": [XAUUSD]+M5_S_P+v+M5_B_P,
-        "M5_INSTANT": J+M5_B_I
+        "M5_INSTANT": J
     }
 
 def get_all_deals():
-    from_date = datetime(2026, 3, 11)
+    from_date = datetime(2026, 3, 18)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -104,7 +101,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2026, 3, 11)
+    from_date = datetime(2026, 3, 18)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:

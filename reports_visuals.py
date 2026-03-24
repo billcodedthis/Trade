@@ -86,7 +86,7 @@ def get_trading_config():
     }
 
 def get_all_deals():
-    from_date = datetime(2026, 3, 11)
+    from_date = datetime(2026, 3, 18)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -105,7 +105,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2026, 3, 11)
+    from_date = datetime(2026, 3, 18)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:
