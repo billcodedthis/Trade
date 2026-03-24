@@ -1316,7 +1316,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 if not open_deals:
                     continue
                 initial_volume = open_deals[0].volume
-                print(initial_volume)
+                 
                 
                 rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
                 if rates is None or len(rates) == 0:
@@ -1393,7 +1393,7 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                 if not open_deals:
                     continue
                 initial_volume = open_deals[0].volume
-                print(initial_volume)
+                 
                 
                 rates = mt5.copy_rates_range(symbol, timeframe, entry_time, datetime.now())
                 if rates is None or len(rates) == 0:
