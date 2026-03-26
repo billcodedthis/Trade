@@ -29,7 +29,7 @@ v=["Volatility 75 Index.0"]
 US =["Wall Street 30.0"]
 H1_S_I = ["CADCHF.0","EURGBP.0"]
 M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 25 (1s) Index.0","Volatility 75 (1s) Index.0","Volatility 30 (1s) Index.0","Gold Basket.0"]
-M5_B_P=["Boom 300 Index.0","Jump 100 Index.0","Hong Kong 50.0"]
+M5_B_P=["Boom 300 Index.0","Hong Kong 50.0"]
 M15_B_P = ["Volatility 100 (1s) Index.0"]
 M15_S_P = ["Step Index 300.0"]
 
@@ -1771,7 +1771,7 @@ def handle_engulfing_patterns():
                         if count == 1:
                             if pos.volume > min_lot:
                                 t = decimal_places(get_min_lot_size(symbol))
-                                half = round(pos.volume / 1.5, t)
+                                half = round(pos.volume-(pos.volume / 1.5), t)
                                 current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
@@ -1797,7 +1797,7 @@ def handle_engulfing_patterns():
                         elif count >= 2 :
                             if pos.volume > min_lot:
                                 t = decimal_places(get_min_lot_size(symbol))
-                                half = round(pos.volume / 1.5, t)
+                                half = round(pos.volume-(pos.volume / 1.5), t)
                                 current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
@@ -1871,7 +1871,7 @@ def handle_engulfing_patterns():
                     if count == 1:
                         if pos.volume > min_lot:
                             t = decimal_places(get_min_lot_size(symbol))
-                            half = round(pos.volume / 1.5, t)
+                            half = round(pos.volume-(pos.volume / 1.5), t)
                             current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {
@@ -1897,7 +1897,7 @@ def handle_engulfing_patterns():
                     elif count >= 2:
                         if pos.volume > min_lot:
                             t = decimal_places(get_min_lot_size(symbol))
-                            half = round(pos.volume / 1.5, t)
+                            half = round(pos.volume-(pos.volume / 1.5), t)
                             current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {

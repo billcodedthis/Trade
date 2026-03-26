@@ -68,7 +68,7 @@ def get_trading_config():
     US =["Wall Street 30.0"]
     H1_S_I = ["CADCHF.0","EURGBP.0"]
     M5_S_P = ["Volatility 30 (1s) Index.0","Volatility 25 (1s) Index.0","Volatility 75 (1s) Index.0","Volatility 30 (1s) Index.0","Gold Basket.0"]
-    M5_B_P=["Boom 300 Index.0","Jump 100 Index.0","Hong Kong 50.0"]
+    M5_B_P=["Boom 300 Index.0","Hong Kong 50.0"]
     M15_B_P = ["Volatility 100 (1s) Index.0"]
     M15_S_P = ["Step Index 300.0"]
     
