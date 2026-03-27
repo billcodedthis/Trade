@@ -2393,16 +2393,17 @@ def check_a_plus_setup(symbol,df, trend_slope, current_timeframe):
     # For downward channel (negative slope), check demand zones (support)
     if trend_slope < 0:
         for zone in zones['demand_zones']:
-            zone_price = zone['price']
-            # Check if any candle in the dataframe touches this demand zone
-            for i in range(len(df)):
-                candle_low = df['low'].iloc[i]
-                candle_high = df['high'].iloc[i]
-                
-                # Check if zone price falls within candle's range
-                if candle_low <= zone_price <= candle_high:
-                    print(f"✅ A+ Setup detected for {symbol}: Downward channel touches demand zone at {zone_price:.5f}")
-                    return True
+            if not zone['is_broken']:
+                zone_price = zone['price']
+                # Check if any candle in the dataframe touches this demand zone
+                for i in range(len(df)):
+                    candle_low = df['low'].iloc[i]
+                    candle_high = df['high'].iloc[i]
+                    
+                    # Check if zone price falls within candle's range
+                    if candle_low <= zone_price <= candle_high:
+                        print(f"✅ A+ Setup detected for {symbol}: Downward channel touches demand zone at {zone_price:.5f}")
+                        return True
         
         # Also check broken supply zones (now acting as support)
         for zone in zones['supply_zones']:
@@ -2419,16 +2420,17 @@ def check_a_plus_setup(symbol,df, trend_slope, current_timeframe):
     # For upward channel (positive slope), check supply zones (resistance)
     elif trend_slope > 0:
         for zone in zones['supply_zones']:
-            zone_price = zone['price']
-            # Check if any candle in the dataframe touches this supply zone
-            for i in range(len(df)):
-                candle_low = df['low'].iloc[i]
-                candle_high = df['high'].iloc[i]
-                
-                # Check if zone price falls within candle's range
-                if candle_low <= zone_price <= candle_high:
-                    print(f"✅ A+ Setup detected for {symbol}: Upward channel touches supply zone at {zone_price:.5f}")
-                    return True
+            if not zone['is_broken']:
+                zone_price = zone['price']
+                # Check if any candle in the dataframe touches this supply zone
+                for i in range(len(df)):
+                    candle_low = df['low'].iloc[i]
+                    candle_high = df['high'].iloc[i]
+                    
+                    # Check if zone price falls within candle's range
+                    if candle_low <= zone_price <= candle_high:
+                        print(f"✅ A+ Setup detected for {symbol}: Upward channel touches supply zone at {zone_price:.5f}")
+                        return True
         
         # Also check broken demand zones (now acting as resistance)
         for zone in zones['demand_zones']:

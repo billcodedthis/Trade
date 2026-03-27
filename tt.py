@@ -25,7 +25,3 @@ if not mt5.initialize(path=MT5_PATH):
 else:
     print("✅ Successfully connected to MT5!")
 '''
-eng_1 = 0.08 - round(0.08 -(0.08/1.5),2)
-while eng_1 > (0.08/2):
-    eng_1 = round(eng_1 /2,2)
-    print(eng_1)
