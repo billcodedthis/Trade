@@ -1,4 +1,3 @@
-# comprehensive_deriv_analysis.py - FIXED VERSION
 import MetaTrader5 as mt5
 import pandas as pd
 import numpy as np
@@ -791,7 +790,7 @@ def save_comprehensive_excel_report(df: pd.DataFrame):
         return
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    filename = os.path.join(OUTPUT_FOLDER, f"Deriv_Comprehensive_Analysis_{timestamp}.xlsx")
+    filename = os.path.join(OUTPUT_FOLDER, f"Exness_Comprehensive_Analysis_{timestamp}.xlsx")
     
     try:
         with pd.ExcelWriter(filename, engine='openpyxl') as writer:

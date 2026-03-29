@@ -76,9 +76,9 @@ def get_trading_config():
         "H1_PENDING": Jump ,
         "H1_INSTANT": [XAUUSD]+US+H1_S_I,
         "M15_PENDING": [XAUUSD]+M15_B_P+M15_S_P,
-        "M15_INSTANT": J,
+        "M15_INSTANT": [],
         "M5_PENDING": [XAUUSD]+M5_S_P+v+M5_B_P,
-        "M5_INSTANT": J
+        "M5_INSTANT": []
     }
 
 def get_all_deals():

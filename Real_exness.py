@@ -1361,11 +1361,11 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         }
                         close_result = mt5.order_send(close_request)
                         if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
+                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                             print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         elif close_result.comment == "Invalid volume":
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
+                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                             print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
                             modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                         else:
@@ -1439,11 +1439,11 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                             }
                             close_result = mt5.order_send(close_request)
                             if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction} positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
+                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                                 print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
                                 modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             elif close_result.comment == "Invalid volume":
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv {direction} positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
+                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)}  trade.✅")
                                 print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
                                 modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                             else:
@@ -1487,7 +1487,7 @@ def del_completed():
                         start_cooldown(symbol, timeframe)
                         # Hit SL - delete channel and levels
                         if (symbol, timeframe) in active_channels:
-                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Exness SL on {timeframe_to_str(timeframe)}")
                             del active_channels[(symbol,timeframe)]
                         if (symbol, timeframe) in levels:
                             del levels[(symbol,timeframe)]
@@ -1498,7 +1498,7 @@ def del_completed():
                         start_cooldown(symbol, timeframe)
                         # Hit SL - delete channel and levels
                         if (symbol, timeframe) in active_channels:
-                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Exness SL on {timeframe_to_str(timeframe)}")
                             del active_channels[(symbol,timeframe)]
                         if (symbol, timeframe) in levels:
                             del levels[(symbol,timeframe)]
@@ -1511,7 +1511,7 @@ def del_completed():
                 # Hit TP2 - delete channel and levels
                 if (symbol, timeframe) in active_channels:
                     plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
-                    send_telegram_image(plot_filename, f"✅ {symbol} {direction} hit Deriv TP2 on {timeframe_to_str(timeframe)}")
+                    send_telegram_image(plot_filename, f"✅ {symbol} {direction} hit Exness TP2 on {timeframe_to_str(timeframe)}")
                     del active_channels[(symbol,timeframe)]
                 if (symbol, timeframe) in levels:
                     del levels[(symbol,timeframe)]

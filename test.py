@@ -40,19 +40,26 @@ H1_BS=[]
 H1_pen= Jump
 H1_pl= [XAUUSD]+US+H1_S_I
 
-TIMEFRAME_M15= [XAUUSD]+J+M15_B_P+M15_S_P
+TIMEFRAME_M15= [XAUUSD]+M15_B_P+M15_S_P
 M15_B= M15_B_P
-M15_S=J+M15_S_P
+M15_S=M15_S_P
 M15_BS=[XAUUSD]
 M15_pen= [XAUUSD]+M15_B_P+M15_S_P
-M15_pl= J
+M15_pl= []
 
-TIMEFRAME_M5= [XAUUSD]+J+M5_S_P+v+M5_B_P
-M5_S=J+M5_S_P+[XAUUSD]
+TIMEFRAME_M5= [XAUUSD]+M5_S_P+v+M5_B_P
+M5_S=M5_S_P+[XAUUSD]
 M5_B= M5_B_P
 M5_BS= v
 M5_pen= [XAUUSD]+M5_S_P+v+M5_B_P
-M5_pl= J
+M5_pl= []
+
+TIMEFRAME_M1 = []
+M1_S =[]
+M1_B= []
+M1_BS = []
+M1_pen = []
+M1_pl = []
 
 active_channels = {}
 levels={}
@@ -74,10 +81,10 @@ supply_demand_zones = {}  # Store zones for each symbol
 to_be_reloaded=[]
 zone_last_loaded ={}
 ZONE_RELOAD_CONFIG = {
-        mt5.TIMEFRAME_M5: timedelta(hours=12),    # M5 zones reload every 12 hours
-        mt5.TIMEFRAME_M15: timedelta(days=1),      # M15 zones reload daily
-        mt5.TIMEFRAME_H1: timedelta(days=5),       # H1 zones reload every 5 days
-        mt5.TIMEFRAME_H4: timedelta(days=7),       # H4 zones reload weekly
+        mt5.TIMEFRAME_M1: timedelta(hours=12),    # M1 uses M5 zones which should reload every 12 hours
+        mt5.TIMEFRAME_M5: timedelta(days=1),      # M5 uses M15 zones which should reload daily
+        mt5.TIMEFRAME_M15: timedelta(days=5),       # M15 uses H1 zones which should reload every 5 days
+        mt5.TIMEFRAME_H1: timedelta(days=7),       # H1 uses H4 zones which should  reload weekly
     }
 
 
@@ -641,6 +648,23 @@ def update_channel_data(symbol,timeframe):
                             del active_channels[(symbol,timeframe)]
                             break# Skip further processing this round
                 elif symbol in M5_S:
+                        if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+
+            elif timeframe == mt5.TIMEFRAME_M1:
+                if symbol in M1_B:
+                    if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in M1_BS:
+                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in M1_S:
                         if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
                             print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
                             del active_channels[(symbol,timeframe)]
@@ -1553,6 +1577,30 @@ def del_completed():
                 crossed_sl1 = (recent_candles['high'] >= sl1).any()
                 crossed_sl = (recent_candles['high'] >= sl).any()
 
+            if timeframe== mt5.TIMEFRAME_M1:
+                if symbol in M1_pen :
+                    if (direction == "BUY" and crossed_sl) or (direction == "SELL" and crossed_sl):
+                        start_cooldown(symbol, timeframe)
+                        # Hit SL - delete channel and levels
+                        if (symbol, timeframe) in active_channels:
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            del active_channels[(symbol,timeframe)]
+                        if (symbol, timeframe) in levels:
+                            del levels[(symbol,timeframe)]
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
+                        continue  # Skip TP check since we already hit SL
+                elif symbol in M1_pl:
+                    if (direction == "BUY" and crossed_sl1) or (direction == "SELL" and crossed_sl1):
+                        start_cooldown(symbol, timeframe)
+                        # Hit SL - delete channel and levels
+                        if (symbol, timeframe) in active_channels:
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            del active_channels[(symbol,timeframe)]
+                        if (symbol, timeframe) in levels:
+                            del levels[(symbol,timeframe)]
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
+                        continue  # Skip TP check since we already hit SL
+
             if timeframe== mt5.TIMEFRAME_M5:
                 if symbol in M5_pen :
                     if (direction == "BUY" and crossed_sl) or (direction == "SELL" and crossed_sl):
@@ -2038,6 +2086,9 @@ def check_conflicting_slopes():
     # Get all active symbols across all timeframes
     all_symbols = set()
     timeframe_combinations = [
+        (mt5.TIMEFRAME_M1, mt5.TIMEFRAME_M5),
+        (mt5.TIMEFRAME_M1, mt5.TIMEFRAME_M15),
+        (mt5.TIMEFRAME_M1, mt5.TIMEFRAME_H1),
         (mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15),
         (mt5.TIMEFRAME_M5, mt5.TIMEFRAME_H1), 
         (mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1)
@@ -2118,6 +2169,7 @@ def check_extend_active_tp_from_higher_tf(symbol, direction, timeframe):
     
     # Define higher timeframes for each current timeframe
     higher_timeframes = {
+        mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5,mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1],
         mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1],
         mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],
         mt5.TIMEFRAME_H1: []  # No higher timeframe than H1
@@ -2231,6 +2283,7 @@ def update_profit_tracking():
     """Update profit tracking using candle-based bar counts for all active positions"""
     TIMEFRAME_PROFIT_BARS = 48
     TIMEFRAME_PROFIT_DURATIONS = {
+        "M1": timedelta(minutes=48),
         "M5": timedelta(minutes=240),    
         "M15": timedelta(minutes=720),     
         "H1": timedelta(hours=48),     
@@ -2439,6 +2492,7 @@ def check_a_plus_setup(symbol,df, trend_slope, current_timeframe):
     # Get or calculate supply/demand zones for this symbol
     if key not in supply_demand_zones:
         timeframe_map = {
+            mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5],
             mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],
             mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],
             mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]
@@ -2533,17 +2587,18 @@ def preload_supply_demand_zones():
     global supply_demand_zones, zone_last_loaded,ZONE_RELOAD_CONFIG
     
     # Get all symbols from your configuration
-    all_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5)
+    all_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5+TIMEFRAME_M1)
     
     # Define which higher timeframe to use for each trading timeframe
     timeframe_map = {
+        mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5],
         mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],  # For M5 trades: Use M15 zones
         mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],  # For M15 trades: Use H1 zones
         mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]    # For H1 trades: Use H4 zones
     }
     
     # Trading timeframes we actually use
-    trading_timeframes = [mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1]
+    trading_timeframes = [mt5.TIMEFRAME_M1,mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1]
     
     print("🔄 Preloading supply-demand zones for all timeframe combinations...")
     
@@ -2599,6 +2654,7 @@ def should_reload_zones():
     global ZONE_RELOAD_CONFIG
 
     timeframe_map = {
+        mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5],
         mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],  # For M5 trades: Use M15 zones
         mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],  # For M15 trades: Use H1 zones
         mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]    # For H1 trades: Use H4 zones
@@ -2719,7 +2775,7 @@ while True:
         check_engulfing_before_tp1_for_breakeven_trades()
         active=[]
 
-        active_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5)
+        active_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5 + TIMEFRAME_M1)
         for symbol in active_symbols:
             positions = mt5.positions_get(symbol=symbol) or []
             orders = mt5.orders_get(symbol=symbol) or []
@@ -3003,7 +3059,96 @@ while True:
                                 continue
                             check_tp1_and_manage_trades(symbol, position.comment, timeframe)
                 close_pending(symbol)
-  
+
+        for symbol in TIMEFRAME_M1 :
+                timeframe = mt5.TIMEFRAME_M1
+                if is_cooldown_active(symbol, timeframe):
+                    continue
+                if (symbol, timeframe) not in active_channels:
+                    num_bars = [40,50,60,70,80,100]
+                    for i in num_bars:
+                        candles = get_candles(symbol, timeframe, i)
+                        if candles.empty:
+                            continue
+                        channel  = detect_regression_channel(candles,symbol,timeframe)
+                        if channel is not None and channel[0] == True and channel[2]==True:
+                            # Save channel and breakout info
+                            active_channels[(symbol,timeframe)] = {
+                                    "df": channel[1].copy(),
+                                    "breakout_idx": None,
+                                    "last_touch_idx": None,
+                                    "last_touch_price":None,
+                                    "num_bars":i,
+                                    "timeframe":timeframe,
+                                    "last_time" :channel[1]['time'].iloc[-2],
+                                    "a_plus_setup": channel[2]  # Add the A+ setup flag
+                            }
+                            df = active_channels[(symbol,timeframe)]["df"]
+                            last = df.iloc[-10:]
+                            last_trend = df['trend']     
+                            trend_slope = last_trend.iloc[-1] - last_trend.iloc[0]
+                            for i in range(len(last)):
+                                candle = last.iloc[i]
+                                upper_at_i = last['upper'].iloc[i]
+                                lower_at_i = last['lower'].iloc[i]
+                                
+                                broke_above = candle['high'] > upper_at_i
+                                broke_below = candle['low'] < lower_at_i
+
+                                # Breakout matches trend direction? Then delete
+                                if symbol in M1_B:
+                                    if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
+                                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                                            del active_channels[(symbol,timeframe)]
+                                            break# Skip further processing this round
+                                elif symbol in M1_BS:
+                                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 and broke_below):
+                                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                                            del active_channels[(symbol,timeframe)]
+                                            break# Skip further processing this round
+                                elif symbol in M1_S:
+                                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
+                                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                                            del active_channels[(symbol,timeframe)]
+                                            break# Skip further processing this round
+                            break
+                
+                else:
+                        update_channel_data(symbol,timeframe)
+                        if (symbol, timeframe) not in active_channels:
+                            continue
+                        candles = active_channels[(symbol,timeframe)]["df"]
+                        detect_break(candles, symbol,timeframe)
+                        if (symbol, timeframe) not in active_channels:
+                            continue
+                        breakout_idx = active_channels[(symbol,timeframe)]['breakout_idx']
+                        last_touch_idx = active_channels[(symbol,timeframe)]['last_touch_idx']
+                        entry_idx = find_valid_entry(candles, breakout_idx, last_touch_idx,symbol,timeframe)
+                        if (symbol, timeframe) not in active_channels:
+                            continue
+                        if entry_idx:
+                            fib_levels = apply_fibonacci_levels(symbol,entry_idx, candles,timeframe)
+                            if (symbol, timeframe) not in active_channels:
+                                continue
+                            if fib_levels:
+                                    direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
+                                    if symbol in M1_pen :
+                                        pending(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl'], fib_levels['tp2'],fib_levels['sniper'],timeframe)
+                                    elif symbol in M1_pl:
+                                        place_trade(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl1'], fib_levels['tp2'],timeframe)
+                if (symbol, timeframe) in levels :
+                    L =levels[(symbol,timeframe)]
+                    
+                    check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
+                else:
+                    positions = mt5.positions_get(symbol=symbol)
+                    if positions is not None:
+                        for position in positions:
+                            if position.magic != timeframe:
+                                continue
+                            check_tp1_and_manage_trades(symbol, position.comment, timeframe)
+                close_pending(symbol)
+
 
         check_conflicting_slopes()
         check_conflicting_trades()
