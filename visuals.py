@@ -59,11 +59,11 @@ M5_BS=Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+
 M5_pen= Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M5_pl= []
 
-TIMEFRAME_M1 = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+TIMEFRAME_M1 = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M1_S =[]
 M1_B= []
-M1_BS = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
-M1_pen = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M1_BS = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M1_pen = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M1_pl = []
 
 active_channels = {}

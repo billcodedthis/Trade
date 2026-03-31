@@ -78,7 +78,9 @@ def get_trading_config():
         "M15_PENDING": [XAUUSD]+M15_B_P+M15_S_P,
         "M15_INSTANT": [],
         "M5_PENDING": [XAUUSD]+M5_S_P+v+M5_B_P,
-        "M5_INSTANT": []
+        "M5_INSTANT": [],
+        "M1_PENDING": [],
+        "M1_INSTANT": []
     }
 
 def get_all_deals():
@@ -338,6 +340,9 @@ def analyze_pending_orders_enhanced():
         elif tf_str == "M5":
             if symbol in config["M5_PENDING"]: order_type = "PENDING"
             elif symbol in config["M5_INSTANT"]: order_type = "INSTANT"
+        elif tf_str == "M1":
+            if symbol in config["M1_PENDING"]: order_type = "PENDING"
+            elif symbol in config["M1_INSTANT"]: order_type = "INSTANT"
 
         if order_type == "UNKNOWN":
             continue
@@ -444,6 +449,8 @@ def analyze_completed_trades():
             tf_key = "M15"
         elif magic == mt5.TIMEFRAME_M5 or timeframe_str == "M5":
             tf_key = "M5"
+        elif magic == mt5.TIMEFRAME_M1 or timeframe_str == "M1":
+            tf_key = "M1"
             
         if tf_key:
             if symbol in config.get(f"{tf_key}_PENDING", []) or symbol in config.get(f"{tf_key}_INSTANT", []):
