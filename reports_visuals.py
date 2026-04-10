@@ -594,9 +594,15 @@ def generate_comprehensive_report(df: pd.DataFrame):
         total_profit = pd.to_numeric(completed_trades['Profit'], errors='coerce').sum()
         win_rate = (completed_trades['Outcome'] == 'WINNER').mean() * 100
         avg_profit = pd.to_numeric(completed_trades['Profit'], errors='coerce').mean()
+
+        trades_without_be = completed_trades[completed_trades['Outcome'] != 'BREAKEVEN']
+        win_rate_excluding_be = (trades_without_be['Outcome'] == 'WINNER').mean() * 100 if len(trades_without_be) > 0 else win_rate
+        be_count = (completed_trades['Outcome'] == 'BREAKEVEN').sum()
         
         print(f"Total Profit: ${total_profit:.2f}")
         print(f"Win Rate: {win_rate:.1f}%")
+        print(f"Win Rate (excluding BE): {win_rate_excluding_be:.1f}%")
+        print(f"Breakeven Trades: {be_count}")
         print(f"Average Profit per Trade: ${avg_profit:.2f}")
         
         stfd_performance = completed_trades.groupby(['Symbol', 'Timeframe', 'Direction']).agg({
