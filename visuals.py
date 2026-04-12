@@ -1624,15 +1624,12 @@ def check_conflicting_trades():
         timeframe = trade.magic
         
         # Determine trade direction
-        if hasattr(trade, 'type'):  # Position
-            trade_direction = "BUY" if trade.type == mt5.ORDER_TYPE_BUY else "SELL"
-        else:  # Order
-            if trade.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP]:
-                trade_direction = "BUY"
-            elif trade.type in [mt5.ORDER_TYPE_SELL_LIMIT, mt5.ORDER_TYPE_SELL_STOP]:
-                trade_direction = "SELL"
-            else:
-                continue  # Skip other order types
+        if trade.type in (mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP):
+            trade_direction = "BUY"
+        elif trade.type in (mt5.ORDER_TYPE_SELL, mt5.ORDER_TYPE_SELL_LIMIT, mt5.ORDER_TYPE_SELL_STOP):
+            trade_direction = "SELL"
+        else:
+            continue
         
         # Check all active channels for this symbol (across all timeframes)
         for (channel_symbol, channel_timeframe) in list(active_channels.keys()):
