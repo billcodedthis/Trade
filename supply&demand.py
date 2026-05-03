@@ -393,11 +393,11 @@ def analyze_symbols():
     
     # Combine all symbols
     all_symbols = list(set(Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices))
-    all=['Jump 75 Index.0']
+    all=['XAUUSD.0']
     
     # Timeframes to analyze
     #timeframes = [mt5.TIMEFRAME_H1, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M5]
-    timeframes = [mt5.TIMEFRAME_M15,mt5.TIMEFRAME_H1,mt5.TIMEFRAME_H4]
+    timeframes = [mt5.TIMEFRAME_M15,mt5.TIMEFRAME_H1,mt5.TIMEFRAME_H4, mt5.TIMEFRAME_M5]
     
     results = {}
     
