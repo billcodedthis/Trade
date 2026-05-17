@@ -61,13 +61,11 @@ TIMEFRAMES = {
 def get_trading_config():
     XAUUSD = "XAUUSDm"
     BTCUSD = "BTCUSDm"
-    Forex_Major= ['AUDJPYm', 'AUDUSDm', 'EURAUDm', 'EURCADm', 'EURCHFm', 'EURGBPm', 'EURJPYm', 'EURUSDm', 'GBPAUDm', 'GBPJPYm', 'GBPUSDm', 'USDCADm', 'USDCHFm', 'USDJPYm']
-    Forex_Minor= ['AUDCADm', 'AUDCHFm', 'AUDNZDm', 'CADCHFm', 'CADJPYm', 'CHFJPYm', 'EURNZDm', 'GBPCADm', 'GBPCHFm', 'GBPNZDm', 'NZDCADm', 'NZDJPYm', 'NZDUSDm']
-
+    
     
     
     return {
-        "M1_PENDING": [XAUUSD,BTCUSD]+Forex_Major+Forex_Minor ,
+        "M1_PENDING": [XAUUSD,BTCUSD] ,
         "M1_INSTANT": []
     }
 

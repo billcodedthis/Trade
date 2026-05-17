@@ -23,15 +23,13 @@ else:
 # Define symbols and timeframes
 XAUUSD = "XAUUSDm"
 BTCUSD = "BTCUSDm"
-Forex_Major= ['AUDJPYm', 'AUDUSDm', 'EURAUDm', 'EURCADm', 'EURCHFm', 'EURGBPm', 'EURJPYm', 'EURUSDm', 'GBPAUDm', 'GBPJPYm', 'GBPUSDm', 'USDCADm', 'USDCHFm', 'USDJPYm']
-Forex_Minor= ['AUDCADm', 'AUDCHFm', 'AUDNZDm', 'CADCHFm', 'CADJPYm', 'CHFJPYm', 'EURNZDm', 'GBPCADm', 'GBPCHFm', 'GBPNZDm', 'NZDCADm', 'NZDJPYm', 'NZDUSDm']
 
 
-TIMEFRAME_M1= [XAUUSD,BTCUSD]+Forex_Major+Forex_Minor
-M1_B= []
+TIMEFRAME_M1= [XAUUSD,BTCUSD]
+M1_B= [BTCUSD]
 M1_S=[]
-M1_BS= [XAUUSD,BTCUSD]+Forex_Major+Forex_Minor
-M1_pen= [XAUUSD,BTCUSD]+Forex_Major+Forex_Minor
+M1_BS= [XAUUSD]
+M1_pen= [XAUUSD,BTCUSD]
 M1_pl= []
 
 active_channels = {}
@@ -68,19 +66,16 @@ def is_time_restricted(symbol):
     if now.weekday() == 4:  # Friday
         if now.hour >= WEEKEND_RESTRICTION_START:
             # Check if symbol is in restricted categories
-            if (symbol in Forex_Major + Forex_Minor or 
-                symbol in [XAUUSD] ):
+            if (symbol in [XAUUSD] ):
                 print(f"⛔ Weekend restriction: {symbol} blocked from {now.strftime('%A %H:%M')} (Friday after {WEEKEND_RESTRICTION_START}:00)")
                 return True
     elif now.weekday() == 6:  # Sunday
-        if (symbol in Forex_Major + Forex_Minor or 
-            symbol in [XAUUSD] ):
+        if (symbol in [XAUUSD] ):
             print(f"⛔ Weekend restriction: {symbol} blocked until {WEEKEND_RESTRICTION_END}:00 Monday")
             return True
     elif now.weekday() == 0:  # Monday
         if now.hour < WEEKEND_RESTRICTION_END:
-            if (symbol in Forex_Major + Forex_Minor or 
-                symbol in [XAUUSD] ):
+            if (symbol in [XAUUSD] ):
                 print(f"⛔ Weekend restriction: {symbol} blocked until {WEEKEND_RESTRICTION_END}:00 Monday")
                 return True
     
