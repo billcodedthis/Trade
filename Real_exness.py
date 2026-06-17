@@ -232,8 +232,8 @@ def is_connected():
         return False
 
 def send_telegram_image(image_path, caption=""):
-    bot_token = "7851945053:AAExF_JdIYTbCWytWNcAnIK9kFaHXZ1sWE8"
-    channel_id = "-1003561925188"
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    channel_id = os.getenv("TELEGRAM_CHANNEL_ID_REAL_EXNESS", "")
     url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
 
     with open(image_path, "rb") as image_file:
@@ -253,8 +253,8 @@ def send_telegram_image(image_path, caption=""):
             print(f"❌ Telegram image error: {e}")
 
 def send_telegram_message(text):
-    bot_token = "7851945053:AAExF_JdIYTbCWytWNcAnIK9kFaHXZ1sWE8"  # replace with your bot token
-    channel_id = "-1003561925188"  # e.g., "-1001234567890"
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    channel_id = os.getenv("TELEGRAM_CHANNEL_ID_REAL_EXNESS", "")
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     
     payload = {
