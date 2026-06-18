@@ -12,6 +12,9 @@ from pathlib import Path
 import signal
 import sys
 import re
+from dotenv import load_dotenv
+
+load_dotenv()
 
 MT5_PATH ="C:\\Program Files\\MetaTrader 5 Terminal\\terminal64.exe"
 if not mt5.initialize(path=MT5_PATH):
