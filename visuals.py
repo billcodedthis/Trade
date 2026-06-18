@@ -671,15 +671,16 @@ def update_channel_data(symbol,timeframe):
 
     return True
 
-def detect_regression_channel(df,symbol,timeframe):
+def detect_regression_channel(df, symbol, timeframe):
     positions = [pos for pos in mt5.positions_get(symbol=symbol) if pos.magic == timeframe]
     orders = [order for order in mt5.orders_get(symbol=symbol) if order.magic == timeframe]
     if positions or orders:
         return
-    # Split data - exclude last 5 candles for analysis but keep full data for plotting
+
+    # Split data - exclude last 10 candles for analysis but keep full data for plotting
     analysis_df = df.iloc[:-10].copy()
     full_df = df.copy()
-    
+
     # Original channel calculation (using analysis portion only)
     X = np.arange(len(analysis_df)).reshape(-1, 1)
     y = analysis_df['close'].values
@@ -689,63 +690,83 @@ def detect_regression_channel(df,symbol,timeframe):
     std_dev = np.std(residuals)
     upper = trend_line + 2 * std_dev
     lower = trend_line - 3 * std_dev
-    
+
     # Extend to full dataset for plotting
     X_full = np.arange(len(full_df)).reshape(-1, 1)
     trend_line_full = model.predict(X_full)
     upper_full = trend_line_full + 2 * std_dev
     lower_full = trend_line_full - 3 * std_dev
-    
+
     # Store extended lines in full dataframe
     full_df['upper'] = upper_full
     full_df['lower'] = lower_full
     full_df['trend'] = trend_line_full
 
-    # YOUR ORIGINAL VALIDATION LOGIC EXACTLY AS WAS (but using analysis_df)
+    # ── helper: recount all touches with debounce after any refit ──────────────
+    def recount_touches(upper, lower, upper_touch_indices, lower_touch_indices):
+        """
+        Re-scan analysis_df from scratch and recount upper/lower touches using
+        the same 5-candle debounce as the main loop.  Returns updated counts and
+        index lists so subsequent logic stays consistent.
+        """
+        u_count, l_count = 0, 0
+        u_indices, l_indices = [], []
+        for m in range(1, len(analysis_df)):
+            recent_upper = any((m - idx) <= 5 for idx in u_indices)
+            recent_lower = any((m - idx) <= 5 for idx in l_indices)
+            if analysis_df['high'].iloc[m] == upper[m] and not recent_upper:
+                u_count += 1
+                u_indices.append(m)
+            if analysis_df['low'].iloc[m] == lower[m] and not recent_lower:
+                l_count += 1
+                l_indices.append(m)
+        return u_count, l_count, u_indices, l_indices
+    # ───────────────────────────────────────────────────────────────────────────
+
     upper_touch_count = 0
     lower_touch_count = 0
     breakout = None
     validated = False
     upper_touch_indices = []
     lower_touch_indices = []
-    
+
     for i in range(1, len(analysis_df)):
         # Check if there was a touch in the last 5 candles
         recent_upper_touch = any((i - idx) <= 5 for idx in upper_touch_indices)
         recent_lower_touch = any((i - idx) <= 5 for idx in lower_touch_indices)
 
-        # Original touch counting logic (unchanged)
+        # Touch counting logic
         if analysis_df['high'].iloc[i] > upper[i]:
             extreme_price = analysis_df['high'].iloc[i]
             new_upper_adjustment = extreme_price - upper[i]
             upper += new_upper_adjustment
-            upper_full += new_upper_adjustment  # Mirror adjustment in full data
+            upper_full += new_upper_adjustment
             full_df['upper'] = upper_full
-            
+
         if analysis_df['high'].iloc[i] == upper[i] and not recent_upper_touch:
             upper_touch_count += 1
             upper_touch_indices.append(i)
-            
+
         if analysis_df['low'].iloc[i] < lower[i]:
             extreme_price = analysis_df['low'].iloc[i]
             new_lower_adjustment = extreme_price - lower[i]
             lower += new_lower_adjustment
-            lower_full += new_lower_adjustment  # Mirror adjustment in full data
+            lower_full += new_lower_adjustment
             full_df['lower'] = lower_full
-            
+
         if analysis_df['low'].iloc[i] == lower[i] and not recent_lower_touch:
             lower_touch_count += 1
             lower_touch_indices.append(i)
 
-        # Original breakout logic (unchanged)
-        if analysis_df['close'].iloc[i-1] <= upper[i-1] and analysis_df['close'].iloc[i] > upper[i-1]:
+        # Breakout detection
+        if analysis_df['close'].iloc[i - 1] <= upper[i - 1] and analysis_df['close'].iloc[i] > upper[i - 1]:
             breakout = i
             direction = 'upper'
-        elif analysis_df['close'].iloc[i-1] >= lower[i-1] and analysis_df['close'].iloc[i] < lower[i-1]:
+        elif analysis_df['close'].iloc[i - 1] >= lower[i - 1] and analysis_df['close'].iloc[i] < lower[i - 1]:
             breakout = i
             direction = 'lower'
 
-        # Original breakout validation (unchanged)
+        # Breakout validation + refit
         if breakout is not None:
             valid_breakout = True
             for j in range(breakout, min(breakout + 3, len(analysis_df))):
@@ -753,7 +774,7 @@ def detect_regression_channel(df,symbol,timeframe):
                    (direction == 'lower' and analysis_df['close'].iloc[j] >= lower[j]):
                     valid_breakout = False
                     break
-            
+
             if not valid_breakout:
                 if direction == 'upper':
                     extreme_price = max(analysis_df['high'].iloc[breakout:min(breakout + 3, len(analysis_df))])
@@ -767,63 +788,61 @@ def detect_regression_channel(df,symbol,timeframe):
                     lower += new_lower_adjustment
                     lower_full += new_lower_adjustment
                     full_df['lower'] = lower_full
-                
+
                 breakout = None
-                upper_touch_count = 0
-                lower_touch_count = 0
-                
-                for m in range(1, len(analysis_df)):
-                    if analysis_df['high'].iloc[m] == upper[m]:
-                        upper_touch_count += 1
-                    if analysis_df['low'].iloc[m] == lower[m]:
-                        lower_touch_count += 1
-        
-        # Original validation condition (unchanged)
-        if (upper_touch_count >= 2 and lower_touch_count >= 1) or (upper_touch_count >= 1 and lower_touch_count >= 2):
+                # FIX: use debounced recount instead of bare loop
+                (upper_touch_count, lower_touch_count,
+                 upper_touch_indices, lower_touch_indices) = recount_touches(
+                    upper, lower, upper_touch_indices, lower_touch_indices)
+
+        # Validation condition
+        if (upper_touch_count >= 2 and lower_touch_count >= 1) or \
+           (upper_touch_count >= 1 and lower_touch_count >= 2):
             validated = True
             break
-    
-    # Check for touch imbalance and adjust boundaries if needed
+
+    # ── Fallback: adjust boundary if one side has zero touches ─────────────────
     if not validated:
         if upper_touch_count >= 2 and lower_touch_count == 0:
-            # Adjust lower boundary to be closer to trend line
-            lower = trend_line - 2 * std_dev  # Was -3, increase
+            # Bring lower band in closer to the trend line
+            lower = trend_line - 2 * std_dev
             lower_full = trend_line_full - 2 * std_dev
             full_df['lower'] = lower_full
-            
-            # Re-count touches with new boundaries
+
+            # Reset only the lower-side state; keep upper state intact
             lower_touch_count = 0
             lower_touch_indices = []
             breakout = None
+
             for k in range(1, len(analysis_df)):
                 recent_lower_touch = any((k - idx) <= 5 for idx in lower_touch_indices)
+
                 if analysis_df['low'].iloc[k] < lower[k]:
                     extreme_price = analysis_df['low'].iloc[k]
                     new_lower_adjustment = extreme_price - lower[k]
                     lower += new_lower_adjustment
-                    lower_full += new_lower_adjustment  # Mirror adjustment in full data
+                    lower_full += new_lower_adjustment
                     full_df['lower'] = lower_full
-                    
+
                 if analysis_df['low'].iloc[k] == lower[k] and not recent_lower_touch:
                     lower_touch_count += 1
                     lower_touch_indices.append(k)
-                
-                if analysis_df['close'].iloc[k-1] <= upper[k-1] and analysis_df['close'].iloc[k] > upper[k-1]:
+
+                if analysis_df['close'].iloc[k - 1] <= upper[k - 1] and analysis_df['close'].iloc[k] > upper[k - 1]:
                     breakout = k
                     direction = 'upper'
-                elif analysis_df['close'].iloc[k-1] >= lower[k-1] and analysis_df['close'].iloc[k] < lower[k-1]:
+                elif analysis_df['close'].iloc[k - 1] >= lower[k - 1] and analysis_df['close'].iloc[k] < lower[k - 1]:
                     breakout = k
                     direction = 'lower'
 
-                # Original breakout validation (unchanged)
                 if breakout is not None:
                     valid_breakout = True
                     for j in range(breakout, min(breakout + 3, len(analysis_df))):
                         if (direction == 'upper' and analysis_df['close'].iloc[j] <= upper[j]) or \
-                        (direction == 'lower' and analysis_df['close'].iloc[j] >= lower[j]):
+                           (direction == 'lower' and analysis_df['close'].iloc[j] >= lower[j]):
                             valid_breakout = False
                             break
-                    
+
                     if not valid_breakout:
                         if direction == 'upper':
                             extreme_price = max(analysis_df['high'].iloc[breakout:min(breakout + 3, len(analysis_df))])
@@ -837,58 +856,57 @@ def detect_regression_channel(df,symbol,timeframe):
                             lower += new_lower_adjustment
                             lower_full += new_lower_adjustment
                             full_df['lower'] = lower_full
-                        
+
                         breakout = None
-                        upper_touch_count = 0
-                        lower_touch_count = 0
-                        
-                        for m in range(1, len(analysis_df)):
-                            if analysis_df['high'].iloc[m] == upper[m]:
-                                upper_touch_count += 1
-                            if analysis_df['low'].iloc[m] == lower[m]:
-                                lower_touch_count += 1
-            if (upper_touch_count >= 2 and lower_touch_count >= 1) or (upper_touch_count >= 1 and lower_touch_count >= 2):
+                        # FIX: use debounced recount instead of bare loop
+                        (upper_touch_count, lower_touch_count,
+                         upper_touch_indices, lower_touch_indices) = recount_touches(
+                            upper, lower, upper_touch_indices, lower_touch_indices)
+
+            if (upper_touch_count >= 2 and lower_touch_count >= 1) or \
+               (upper_touch_count >= 1 and lower_touch_count >= 2):
                 validated = True
-                
+
         elif lower_touch_count >= 2 and upper_touch_count == 0:
-            # Adjust upper boundary to be closer to trend line
-            upper = trend_line + std_dev  # Was +2, decrease
+            # Bring upper band in closer to the trend line
+            upper = trend_line + std_dev
             upper_full = trend_line_full + std_dev
             full_df['upper'] = upper_full
-            
-            # Re-count touches with new boundaries
+
+            # Reset only the upper-side state; keep lower state intact
             upper_touch_count = 0
             upper_touch_indices = []
             breakout = None
+
             for k in range(1, len(analysis_df)):
                 recent_upper_touch = any((k - idx) <= 5 for idx in upper_touch_indices)
+
                 if analysis_df['high'].iloc[k] > upper[k]:
                     extreme_price = analysis_df['high'].iloc[k]
                     new_upper_adjustment = extreme_price - upper[k]
                     upper += new_upper_adjustment
-                    upper_full += new_upper_adjustment  # Mirror adjustment in full data
+                    upper_full += new_upper_adjustment
                     full_df['upper'] = upper_full
-                    
+
                 if analysis_df['high'].iloc[k] == upper[k] and not recent_upper_touch:
                     upper_touch_count += 1
                     upper_touch_indices.append(k)
-                
-                if analysis_df['close'].iloc[k-1] <= upper[k-1] and analysis_df['close'].iloc[k] > upper[k-1]:
+
+                if analysis_df['close'].iloc[k - 1] <= upper[k - 1] and analysis_df['close'].iloc[k] > upper[k - 1]:
                     breakout = k
                     direction = 'upper'
-                elif analysis_df['close'].iloc[k-1] >= lower[k-1] and analysis_df['close'].iloc[k] < lower[k-1]:
+                elif analysis_df['close'].iloc[k - 1] >= lower[k - 1] and analysis_df['close'].iloc[k] < lower[k - 1]:
                     breakout = k
                     direction = 'lower'
 
-                # Original breakout validation (unchanged)
                 if breakout is not None:
                     valid_breakout = True
                     for j in range(breakout, min(breakout + 3, len(analysis_df))):
                         if (direction == 'upper' and analysis_df['close'].iloc[j] <= upper[j]) or \
-                        (direction == 'lower' and analysis_df['close'].iloc[j] >= lower[j]):
+                           (direction == 'lower' and analysis_df['close'].iloc[j] >= lower[j]):
                             valid_breakout = False
                             break
-                    
+
                     if not valid_breakout:
                         if direction == 'upper':
                             extreme_price = max(analysis_df['high'].iloc[breakout:min(breakout + 3, len(analysis_df))])
@@ -902,27 +920,23 @@ def detect_regression_channel(df,symbol,timeframe):
                             lower += new_lower_adjustment
                             lower_full += new_lower_adjustment
                             full_df['lower'] = lower_full
-                        
+
                         breakout = None
-                        upper_touch_count = 0
-                        lower_touch_count = 0
-                        
-                        for m in range(1, len(analysis_df)):
-                            if analysis_df['high'].iloc[m] == upper[m]:
-                                upper_touch_count += 1
-                            if analysis_df['low'].iloc[m] == lower[m]:
-                                lower_touch_count += 1
-            if (upper_touch_count >= 2 and lower_touch_count >= 1) or (upper_touch_count >= 1 and lower_touch_count >= 2):
+                        # FIX: use debounced recount instead of bare loop
+                        (upper_touch_count, lower_touch_count,
+                         upper_touch_indices, lower_touch_indices) = recount_touches(
+                            upper, lower, upper_touch_indices, lower_touch_indices)
+
+            if (upper_touch_count >= 2 and lower_touch_count >= 1) or \
+               (upper_touch_count >= 1 and lower_touch_count >= 2):
                 validated = True
-                
 
     a_plus_setup = False
     if validated:
-        # Calculate trend slope for A+ setup check
         trend_slope = full_df['trend'].iloc[-1] - full_df['trend'].iloc[0]
-        a_plus_setup = check_a_plus_setup(symbol,full_df, trend_slope,timeframe)
+        a_plus_setup = check_a_plus_setup(symbol, full_df, trend_slope, timeframe)
 
-    return validated, full_df, a_plus_setup 
+    return validated, full_df, a_plus_setup
 
 def find_valid_entry(df, breakout_idx, last_touch_idx,symbol,timeframe):
     not_valid_entry=False

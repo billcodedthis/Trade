@@ -14,7 +14,6 @@ from openpyxl.chart import PieChart, BarChart, Reference
 import matplotlib.font_manager as fm
 from typing import List, Dict, Any, Tuple
 import shutil
-from sklearn.linear_model import LinearRegression
 
 # === CONFIGURATION ===
 MT5_PATH = r"C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe"
@@ -57,14 +56,13 @@ TIMEFRAMES = {
     1: "M1", 5: "M5", 15: "M15", 30: "M30",
     16385: "H1", 16388: "H4", 16408: "D1"
 }
-
 # === CANDLE-CONTEXT ANALYSIS CONFIG ===
 # For every COMPLETED trade we pull the candles leading up to entry, tag the entry candle and the
 # swing candle (the last opposite-coloured candle before entry, same rule the bot itself uses), and
 # compute a set of indicators on each candle so we can compare winners vs losers.
-CANDLE_CONTEXT_LOOKBACK = 30        # candles to pull before (and including) the entry candle
-CANDLE_INDICATOR_WARMUP = 50        # extra candles fetched purely to warm up rolling indicators
-CANDLE_CONTEXT_MAX_CHARTS = 40      # cap on highlighted candle charts generated (set to None for no cap)
+CANDLE_CONTEXT_LOOKBACK = 100        # candles to pull before (and including) the entry candle
+CANDLE_INDICATOR_WARMUP = 20       # extra candles fetched purely to warm up rolling indicators
+CANDLE_CONTEXT_MAX_CHARTS = 100      # cap on highlighted candle charts generated (set to None for no cap)
 ENABLE_CANDLE_CONTEXT_ANALYSIS = True
 
 STD_DEV_WINDOW = 20   # rolling window for std-dev / volume / body / range z-scores
@@ -73,34 +71,12 @@ RSI_WINDOW = 14
 EMA_FAST = 9
 EMA_SLOW = 21
 
-# === REGRESSION CHANNEL RECONSTRUCTION CONFIG ===
-# visuals.py never logs which num_bars window or creation point produced the regression
-# channel for a given trade, so we re-derive it: walk backward from the now-known
-# entry_candle_idx to find the structural swing/BOS point (mirrors detect_break's
-# last_touch logic but anchored on price action, no channel needed), then search over the
-# bot's actual num_bars candidates + a range of channel-creation offsets for the regression
-# fit whose band lands exactly on that swing point. Best (lowest price error) match wins;
-# flagged 'approximate' in the output if the error exceeds CHANNEL_MATCH_TOLERANCE.
-CHANNEL_NUM_BARS_BY_TF = {
-    "H1": [40, 50, 60, 70, 80, 100],
-    "M15": [40, 50, 60, 70, 80],
-    "M5": [30, 40, 50, 60, 70, 80],
-    "M1": [40, 50, 60, 70, 80, 100],
-}
-CHANNEL_UPPER_STD_MULT = 2.0   # mirrors detect_regression_channel: upper = trend + 2*std
-CHANNEL_LOWER_STD_MULT = 3.0   # mirrors detect_regression_channel: lower = trend - 3*std
-CHANNEL_SWING_LOOKBACK = 3            # bars each side used to confirm a local swing high/low
-CHANNEL_MAX_SCAN_BACK = 12            # how far before entry_idx to search for the swing/BOS point
-CHANNEL_CREATION_OFFSET_RANGE = 20    # how far before/after the swing point to try as the
-                                       # channel's analysis-window end point (creation_end)
-CHANNEL_MATCH_TOLERANCE_ATR_FRAC = 0.05   # error vs 5% of ATR at the swing point = "exact"
-ENABLE_CHANNEL_RECONSTRUCTION = True
-
 TF_TO_MT5 = {
     "M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
     "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1
 }
 TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
+
 
 # Trading configuration from visuals.py
 def get_trading_config():
@@ -766,34 +742,6 @@ def get_trade_candle_context(symbol, tf_str, signal_time, trigger_time, lookback
     return window, entry_idx, trigger_idx, swing_idx
 
 
-def get_channel_reconstruction_window(symbol, tf_str, signal_time):
-    """
-    The display window built by get_trade_candle_context() is intentionally short
-    (CANDLE_CONTEXT_LOOKBACK candles) -- enough for indicator snapshots, but not enough history
-    to fit a regression channel that may have used up to 100 bars (see CHANNEL_NUM_BARS_BY_TF)
-    plus up to CHANNEL_CREATION_OFFSET_RANGE bars of slack around the swing point. This fetches
-    a separate, wider window purely for channel reconstruction, and returns the entry_idx
-    re-expressed relative to THIS wider window (channel reconstruction needs its own index
-    space; the display window's entry_idx doesn't directly apply here).
-
-    Returns (channel_window, channel_entry_idx) or (None, None) if data is unavailable.
-    """
-    max_num_bars = max(CHANNEL_NUM_BARS_BY_TF.get(tf_str, [80]))
-    needed_lookback = max_num_bars + CHANNEL_CREATION_OFFSET_RANGE + CHANNEL_MAX_SCAN_BACK + 15
-
-    raw = fetch_candle_window(symbol, tf_str, signal_time, lookback=needed_lookback, extra_forward=0)
-    if raw.empty or len(raw) < 20:
-        return None, None
-
-    enriched = compute_candle_indicators(raw)
-    tf_minutes = TF_MINUTES.get(tf_str, 1)
-    placement_idx = _locate_candle_idx(enriched, signal_time, tf_minutes)
-    if placement_idx is None or placement_idx < 1:
-        return None, None
-    channel_entry_idx = placement_idx - 1
-    return enriched, channel_entry_idx
-
-
 CANDLE_SNAPSHOT_COLS = [
     'open', 'high', 'low', 'close', 'volume', 'body', 'body_abs', 'range',
     'upper_wick', 'lower_wick', 'body_pct_of_range', 'std_dev_20', 'atr_14',
@@ -801,276 +749,6 @@ CANDLE_SNAPSHOT_COLS = [
     'dist_from_ema_slow_pct', 'ema_fast_slope', 'volume_zscore_20',
     'body_zscore_20', 'range_zscore_20'
 ]
-
-
-# =====================================================================================
-# REGRESSION CHANNEL RECONSTRUCTION
-# =====================================================================================
-# visuals.py never logs which num_bars window or which bar the channel was created on, and
-# the channel is fit once then linearly extrapolated forward (not refit every bar), so it
-# can't be looked up -- it has to be re-derived. The approach:
-#
-#   1. Find the structural swing/BOS point (last_touch_idx / last_touch_price) purely from
-#      price action, anchored on the already-known entry_idx. This mirrors detect_break()'s
-#      definition (the most recent candle whose wick is a local extreme, using its OPEN or
-#      CLOSE -- whichever is the body's outer edge -- as the touch price) without needing the
-#      channel's upper/lower arrays at all.
-#   2. Search over the bot's real num_bars candidates for that timeframe, and a range of
-#      possible channel-creation end-points, for the regression fit whose extrapolated band
-#      lands exactly on that swing point at that index. Lowest price error wins.
-#   3. Cross-check with the touch-count rule detect_regression_channel itself requires
-#      ((upper>=2 and lower>=1) or (upper>=1 and lower>=2)) as a plausibility signal.
-#
-# This is reconstruction, not log replay: ties are possible, and the result is only ever as
-# good as "the channel most consistent with the known facts." Each result is tagged with a
-# Match_Quality flag so 'approximate' matches can be filtered out of the highest-confidence
-# analyses if desired, without throwing the trade away entirely.
-
-def find_swing_candidates(window: pd.DataFrame, entry_idx: int, direction: str,
-                           max_scan_back=CHANNEL_MAX_SCAN_BACK,
-                           swing_lookback=CHANNEL_SWING_LOOKBACK):
-    """
-    Generates EVERY local-extreme candidate in the scan-back range as a possible
-    last_touch_idx/last_touch_price -- not just the nearest one. The actual swing point isn't a
-    fixed-lookback rule; it's whatever the regression channel's band happened to sit on, which is
-    purely market-determined. So this function only proposes candidates (any local high/low,
-    however minor); reconstruct_regression_channel() is what actually validates each one by
-    checking whether a real channel fit lands its band on that exact wick. The candidate whose
-    channel-fit error is lowest is the one most likely to be the genuine touch point.
-
-    direction: "SELL" -> upper break (swing HIGH, entry candle closes UP through touch price)
-               "BUY"  -> lower break (swing LOW,  entry candle closes DOWN through touch price)
-
-    Returns a list of (swing_idx, touch_price) tuples, nearest-to-entry first.
-    """
-    lo = max(swing_lookback, entry_idx - max_scan_back)
-    candidates = []
-    for j in range(entry_idx - 1, lo - 1, -1):
-        left = window.iloc[max(0, j - swing_lookback): j]
-        right = window.iloc[j + 1: j + 1 + swing_lookback]
-        if len(left) == 0 or len(right) == 0:
-            continue
-        if direction == "SELL":
-            is_swing = (window['high'].iloc[j] >= left['high'].max()
-                        and window['high'].iloc[j] >= right['high'].max())
-            if is_swing:
-                bullish = window['close'].iloc[j] > window['open'].iloc[j]
-                touch_price = window['close'].iloc[j] if bullish else window['open'].iloc[j]
-                candidates.append((j, float(touch_price)))
-        else:  # BUY
-            is_swing = (window['low'].iloc[j] <= left['low'].min()
-                        and window['low'].iloc[j] <= right['low'].min())
-            if is_swing:
-                bearish = window['close'].iloc[j] < window['open'].iloc[j]
-                touch_price = window['close'].iloc[j] if bearish else window['open'].iloc[j]
-                candidates.append((j, float(touch_price)))
-    return candidates
-
-
-def _fit_regression(closes: np.ndarray):
-    """Linear regression on close price, returns (model, residual_std)."""
-    X = np.arange(len(closes)).reshape(-1, 1)
-    model = LinearRegression().fit(X, closes)
-    resid = closes - model.predict(X)
-    return model, float(np.std(resid))
-
-
-def reconstruct_regression_channel(window: pd.DataFrame, swing_idx: int, swing_price: float,
-                                    direction: str, tf_str: str,
-                                    creation_offset_range=CHANNEL_CREATION_OFFSET_RANGE,
-                                    upper_mult=CHANNEL_UPPER_STD_MULT,
-                                    lower_mult=CHANNEL_LOWER_STD_MULT):
-    """
-    Searches over num_bars candidates (the bot's real per-timeframe list) and channel-creation
-    end-points for the regression fit whose extrapolated band lands on `swing_price` at
-    `swing_idx`. Returns the best match as a dict, or None if no valid window could be fit.
-
-    The 'creation_end' is the bar index (within `window`) where detect_regression_channel's
-    analysis_df would have ended (analysis_df = df.iloc[:-10] of whatever slice was fetched at
-    creation time) -- i.e. analysis spans [creation_end - num_bars, creation_end - 10], with the
-    full channel then extrapolated forward through creation_end and beyond via update_channel_data.
-    Since we don't know exactly when the channel was created relative to the swing point, we try
-    every creation_end within `creation_offset_range` bars either side of swing_idx.
-    """
-    num_bars_candidates = CHANNEL_NUM_BARS_BY_TF.get(tf_str, [40, 50, 60, 70, 80])
-    target_band = "upper" if direction == "SELL" else "lower"
-    band_key = "high" if direction == "SELL" else "low"
-
-    lo_bound = max(0, swing_idx - creation_offset_range)
-    hi_bound = min(len(window) - 1, swing_idx + creation_offset_range)
-
-    best = None
-    for num_bars in num_bars_candidates:
-        for creation_end in range(hi_bound, lo_bound - 1, -1):
-            analysis_end = creation_end - 10
-            start = analysis_end - num_bars
-            if start < 0 or analysis_end <= start + 10:
-                continue
-
-            analysis_closes = window['close'].iloc[start:analysis_end].values
-            if len(analysis_closes) < 10:
-                continue
-            model, std = _fit_regression(analysis_closes)
-
-            full_len = creation_end - start
-            if full_len <= 0 or start + full_len > len(window):
-                continue
-            X_full = np.arange(full_len).reshape(-1, 1)
-            trend_full = model.predict(X_full)
-            upper_full = trend_full + upper_mult * std
-            lower_full = trend_full - lower_mult * std
-
-            touch_pos = swing_idx - start
-            if touch_pos < 0 or touch_pos >= full_len:
-                continue
-
-            band_val = upper_full[touch_pos] if target_band == "upper" else lower_full[touch_pos]
-            actual_wick = window[band_key].iloc[swing_idx]
-            error = abs(actual_wick - band_val)
-
-            candidate = {
-                'num_bars': num_bars, 'start': start, 'analysis_end': analysis_end,
-                'creation_end': creation_end, 'model': model, 'std': std, 'error': error,
-            }
-            if best is None or error < best['error']:
-                best = candidate
-
-    if best is None:
-        return None
-
-    # Build full trend/upper/lower arrays spanning the whole `window` (clipped to what the
-    # fit can legitimately cover: from the analysis start onward) for feature extraction
-    # and charting.
-    start = best['start']
-    span = len(window) - start
-    X_span = np.arange(span).reshape(-1, 1)
-    trend_span = best['model'].predict(X_span)
-    upper_span = trend_span + upper_mult * best['std']
-    lower_span = trend_span - lower_mult * best['std']
-
-    trend_full = np.full(len(window), np.nan)
-    upper_full = np.full(len(window), np.nan)
-    lower_full = np.full(len(window), np.nan)
-    trend_full[start:] = trend_span
-    upper_full[start:] = upper_span
-    lower_full[start:] = lower_span
-
-    analysis_window = window.iloc[start: best['analysis_end']]
-    upper_touch_count = int((analysis_window['high'].values >=
-                              upper_full[start: best['analysis_end']]).sum())
-    lower_touch_count = int((analysis_window['low'].values <=
-                              lower_full[start: best['analysis_end']]).sum())
-    touch_rule_passes = (upper_touch_count >= 2 and lower_touch_count >= 1) or \
-                         (upper_touch_count >= 1 and lower_touch_count >= 2)
-
-    return {
-        'num_bars': best['num_bars'],
-        'creation_end': best['creation_end'],
-        'analysis_start': start,
-        'analysis_end': best['analysis_end'],
-        'slope': float(best['model'].coef_[0]),
-        'std': best['std'],
-        'match_error': float(best['error']),
-        'upper_touch_count': upper_touch_count,
-        'lower_touch_count': lower_touch_count,
-        'touch_rule_passes': touch_rule_passes,
-        'trend': trend_full,
-        'upper': upper_full,
-        'lower': lower_full,
-    }
-
-
-def get_channel_match_quality(channel: dict, window: pd.DataFrame, swing_idx: int) -> str:
-    """Flags a reconstructed channel as 'exact', 'approximate', or 'unreliable' based on how
-    close the band match was relative to local ATR, and whether the touch-count rule passes."""
-    if channel is None:
-        return 'failed'
-    atr_at_swing = window['atr_14'].iloc[swing_idx] if 'atr_14' in window.columns else np.nan
-    if pd.isna(atr_at_swing) or atr_at_swing == 0:
-        tolerance = 1e-6
-    else:
-        tolerance = atr_at_swing * CHANNEL_MATCH_TOLERANCE_ATR_FRAC
-
-    if channel['match_error'] <= tolerance and channel['touch_rule_passes']:
-        return 'exact'
-    elif channel['match_error'] <= tolerance * 4:
-        return 'approximate'
-    else:
-        return 'unreliable'
-
-
-def reconstruct_channel_for_trade(window: pd.DataFrame, entry_idx: int, direction: str, tf_str: str):
-    """
-    Full pipeline for one trade: generate every plausible swing/touch candidate near entry,
-    search for the best-fitting regression channel for EACH, and keep whichever
-    (candidate, channel) pair has the lowest price-match error overall. The swing point is
-    market-determined (not a fixed lookback), so the channel-fit quality is what actually
-    decides which candidate was the real touch point -- a genuine touch should let some
-    num_bars/creation-point combination land the band almost exactly on the wick; a stray
-    minor peak generally won't, across every combination tried.
-
-    Returns a flat dict of channel-derived features ready to merge into the entry/swing
-    summary, or None if no swing candidates were found at all.
-    """
-    candidates = find_swing_candidates(window, entry_idx, direction)
-    if not candidates:
-        return None
-
-    best_swing_idx = None
-    best_swing_price = None
-    best_channel = None
-    best_score = np.inf
-
-    for swing_idx, swing_price in candidates:
-        channel = reconstruct_regression_channel(window, swing_idx, swing_price, direction, tf_str)
-        if channel is None:
-            continue
-        atr_at_swing = window['atr_14'].iloc[swing_idx] if 'atr_14' in window.columns else np.nan
-        tolerance = atr_at_swing if pd.notna(atr_at_swing) and atr_at_swing > 0 else 1e-6
-        score = channel['match_error'] / tolerance  # normalized so candidates are comparable
-        if score < best_score:
-            best_score = score
-            best_swing_idx = swing_idx
-            best_swing_price = swing_price
-            best_channel = channel
-
-    if best_channel is None:
-        return {'Channel_Match_Quality': 'failed', 'Channel_Swing_Idx': None, 'Channel_Swing_Price': None}
-
-    swing_idx, swing_price, channel = best_swing_idx, best_swing_price, best_channel
-    quality = get_channel_match_quality(channel, window, swing_idx)
-
-    entry_trend = channel['trend'][entry_idx] if entry_idx < len(channel['trend']) else np.nan
-    entry_upper = channel['upper'][entry_idx] if entry_idx < len(channel['upper']) else np.nan
-    entry_lower = channel['lower'][entry_idx] if entry_idx < len(channel['lower']) else np.nan
-    band_width = entry_upper - entry_lower if pd.notna(entry_upper) and pd.notna(entry_lower) else np.nan
-    entry_close = window['close'].iloc[entry_idx]
-    # Where entry sits inside the band: 0 = on lower band, 1 = on upper band
-    entry_pos_in_band = ((entry_close - entry_lower) / band_width) if band_width and not np.isnan(band_width) and band_width != 0 else np.nan
-
-    return {
-        'Channel_Match_Quality': quality,
-        'Channel_Match_Error': channel['match_error'],
-        'Channel_Candidates_Evaluated': len(candidates),
-        'Channel_Num_Bars': channel['num_bars'],
-        'Channel_Swing_Idx': swing_idx,
-        'Channel_Swing_Price': swing_price,
-        'Channel_Slope': channel['slope'],
-        'Channel_Std_Dev': channel['std'],
-        'Channel_Upper_Touch_Count': channel['upper_touch_count'],
-        'Channel_Lower_Touch_Count': channel['lower_touch_count'],
-        'Channel_Touch_Rule_Passes': channel['touch_rule_passes'],
-        'Channel_Trend_At_Entry': entry_trend,
-        'Channel_Upper_At_Entry': entry_upper,
-        'Channel_Lower_At_Entry': entry_lower,
-        'Channel_Band_Width_At_Entry': band_width,
-        'Channel_Entry_Position_In_Band': entry_pos_in_band,  # 0=lower band, 1=upper band
-        'Channel_Upper_Deviation': channel['std'] * CHANNEL_UPPER_STD_MULT,
-        'Channel_Lower_Deviation': channel['std'] * CHANNEL_LOWER_STD_MULT,
-        '_channel_trend_arr': channel['trend'],
-        '_channel_upper_arr': channel['upper'],
-        '_channel_lower_arr': channel['lower'],
-    }
 
 
 def build_candle_context_dataset(df: pd.DataFrame, lookback=CANDLE_CONTEXT_LOOKBACK,
@@ -1089,7 +767,6 @@ def build_candle_context_dataset(df: pd.DataFrame, lookback=CANDLE_CONTEXT_LOOKB
         return pd.DataFrame(), {}
 
     rows = []
-    channel_records = []
     chart_windows = {}
     total = len(completed)
 
@@ -1106,44 +783,7 @@ def build_candle_context_dataset(df: pd.DataFrame, lookback=CANDLE_CONTEXT_LOOKB
         if window is None:
             continue
 
-        # Channel reconstruction needs its OWN, much wider window (a regression channel can be
-        # fit on up to 100 bars of history -- far more than the CANDLE_CONTEXT_LOOKBACK display
-        # window holds), so it's fetched separately and aligned back to `window` by timestamp.
-        channel_feats = None
-        if ENABLE_CHANNEL_RECONSTRUCTION:
-            try:
-                channel_window, channel_entry_idx = get_channel_reconstruction_window(symbol, tf_str, signal_time)
-                if channel_window is not None and channel_entry_idx is not None and channel_entry_idx >= 1:
-                    channel_feats = reconstruct_channel_for_trade(
-                        channel_window, channel_entry_idx, trade.get('Direction'), tf_str)
-                    if channel_feats is not None:
-                        # Re-express the swing index as a TIMESTAMP so it can be matched into
-                        # `window` (a differently-offset/sized index space) further down.
-                        c_swing_idx = channel_feats.get('Channel_Swing_Idx')
-                        channel_feats['Channel_Swing_Time'] = (
-                            channel_window['time'].iloc[c_swing_idx] if c_swing_idx is not None else None
-                        )
-                        channel_feats['_channel_window_times'] = channel_window['time'].values
-            except Exception as e:
-                print(f"⚠️ Channel reconstruction failed for trade {trade_id}: {e}")
-                channel_feats = None
-        if channel_feats is not None:
-            record = {'Trade_ID': trade_id}
-            record.update({k: v for k, v in channel_feats.items() if not k.startswith('_')})
-            channel_records.append(record)
-
-        # Build a time -> array-position lookup for the channel window (if reconstruction
-        # succeeded) so each display-window candle can pull its corresponding channel band
-        # value by matching timestamps, regardless of the two windows' differing offsets.
-        channel_time_to_pos = {}
-        if channel_feats is not None and channel_feats.get('_channel_window_times') is not None:
-            channel_time_to_pos = {t: pos for pos, t in enumerate(channel_feats['_channel_window_times'])}
-
         for i, candle in window.iterrows():
-            candle_time = candle['time']
-            is_channel_swing = (channel_feats is not None
-                                 and channel_feats.get('Channel_Swing_Time') is not None
-                                 and candle_time == channel_feats['Channel_Swing_Time'])
             row = {
                 'Trade_ID': trade_id,
                 'Position_ID': trade.get('Position ID'),
@@ -1154,82 +794,37 @@ def build_candle_context_dataset(df: pd.DataFrame, lookback=CANDLE_CONTEXT_LOOKB
                 'Outcome': trade.get('Outcome'),
                 'Profit': trade.get('Profit'),
                 'Candle_Offset': i - entry_idx,
-                'time': candle_time,
+                'time': candle['time'],
                 'Is_Entry_Candle': (i == entry_idx),
                 'Is_Trigger_Candle': (i == trigger_idx),
                 'Is_Between_Entry_And_Trigger': (entry_idx < i < trigger_idx),
                 'Is_Swing_Candle': (swing_idx is not None and i == swing_idx),
-                'Is_Channel_Swing_Candle': is_channel_swing,
             }
             for col in CANDLE_SNAPSHOT_COLS:
                 row[col] = candle.get(col)
-            if channel_feats is not None:
-                upper_arr = channel_feats.get('_channel_upper_arr')
-                lower_arr = channel_feats.get('_channel_lower_arr')
-                trend_arr = channel_feats.get('_channel_trend_arr')
-                pos = channel_time_to_pos.get(candle_time)
-                row['Channel_Upper'] = upper_arr[pos] if (upper_arr is not None and pos is not None and pos < len(upper_arr)) else np.nan
-                row['Channel_Lower'] = lower_arr[pos] if (lower_arr is not None and pos is not None and pos < len(lower_arr)) else np.nan
-                row['Channel_Trend'] = trend_arr[pos] if (trend_arr is not None and pos is not None and pos < len(trend_arr)) else np.nan
             rows.append(row)
 
         if keep_windows_for_charts is None or len(chart_windows) < keep_windows_for_charts:
-            # For charting we align the channel arrays onto `window`'s own index space (same
-            # timestamp-matching approach) so the chart function can plot them directly
-            # alongside the display window's candles without needing the wider channel window.
-            chart_channel_upper = chart_channel_lower = chart_channel_trend = None
-            chart_channel_swing_idx = None
-            if channel_feats is not None and channel_time_to_pos:
-                upper_arr = channel_feats.get('_channel_upper_arr')
-                lower_arr = channel_feats.get('_channel_lower_arr')
-                trend_arr = channel_feats.get('_channel_trend_arr')
-                chart_channel_upper = np.full(len(window), np.nan)
-                chart_channel_lower = np.full(len(window), np.nan)
-                chart_channel_trend = np.full(len(window), np.nan)
-                for wi, t in enumerate(window['time'].values):
-                    pos = channel_time_to_pos.get(t)
-                    if pos is not None:
-                        if upper_arr is not None and pos < len(upper_arr):
-                            chart_channel_upper[wi] = upper_arr[pos]
-                        if lower_arr is not None and pos < len(lower_arr):
-                            chart_channel_lower[wi] = lower_arr[pos]
-                        if trend_arr is not None and pos < len(trend_arr):
-                            chart_channel_trend[wi] = trend_arr[pos]
-                swing_time = channel_feats.get('Channel_Swing_Time')
-                if swing_time is not None:
-                    swing_matches = np.where(window['time'].values == swing_time)[0]
-                    chart_channel_swing_idx = int(swing_matches[0]) if len(swing_matches) else None
-
             chart_windows[trade_id] = {
                 'window': window, 'entry_idx': entry_idx, 'trigger_idx': trigger_idx,
                 'swing_idx': swing_idx, 'symbol': symbol, 'tf_str': tf_str,
-                'outcome': trade.get('Outcome'),
-                'channel_swing_idx': chart_channel_swing_idx,
-                'channel_upper_arr': chart_channel_upper,
-                'channel_lower_arr': chart_channel_lower,
-                'channel_trend_arr': chart_channel_trend,
-                'channel_match_quality': channel_feats.get('Channel_Match_Quality') if channel_feats else None,
+                'outcome': trade.get('Outcome')
             }
 
         if (trade_id + 1) % 25 == 0:
             print(f"  Candle-context processed {trade_id + 1}/{total} trades...")
 
     context_df = pd.DataFrame(rows)
-    channel_df = pd.DataFrame(channel_records)
     n_trades = context_df['Trade_ID'].nunique() if not context_df.empty else 0
     print(f"Candle-context dataset built: {len(context_df)} candle rows across {n_trades} trades")
-    if not channel_df.empty:
-        quality_counts = channel_df['Channel_Match_Quality'].value_counts().to_dict()
-        print(f"Channel reconstruction quality breakdown: {quality_counts}")
-    return context_df, chart_windows, channel_df
+    return context_df, chart_windows
 
 
-def build_entry_swing_summary(context_df: pd.DataFrame, channel_df: pd.DataFrame = None) -> pd.DataFrame:
+def build_entry_swing_summary(context_df: pd.DataFrame) -> pd.DataFrame:
     """Collapses the long-format candle context into one row per trade: entry-candle snapshot,
-    trigger-candle snapshot, swing-candle snapshot, aggregate stats over every candle that sat
-    between entry and trigger (the gap that only exists for PENDING orders -- for INSTANT trades
-    this gap is empty since trigger_idx == entry_idx + 1), and the reconstructed regression
-    channel's features at entry (slope, band width, touch counts, deviations, match quality)."""
+    trigger-candle snapshot, swing-candle snapshot, and aggregate stats over every candle that
+    sat between entry and trigger (the gap that only exists for PENDING orders -- for INSTANT
+    trades this gap is empty since trigger_idx == entry_idx + 1)."""
     if context_df.empty:
         return pd.DataFrame()
 
@@ -1288,12 +883,7 @@ def build_entry_swing_summary(context_df: pd.DataFrame, channel_df: pd.DataFrame
 
         summaries.append(record)
 
-    summary_df = pd.DataFrame(summaries)
-
-    if channel_df is not None and not channel_df.empty and not summary_df.empty:
-        summary_df = summary_df.merge(channel_df, on='Trade_ID', how='left')
-
-    return summary_df
+    return pd.DataFrame(summaries)
 
 
 def find_winner_indicator_patterns(entry_swing_df: pd.DataFrame) -> pd.DataFrame:
@@ -1307,20 +897,11 @@ def find_winner_indicator_patterns(entry_swing_df: pd.DataFrame) -> pd.DataFrame
 
     feature_cols = [c for c in entry_swing_df.columns
                     if c.startswith('Entry_') or c.startswith('Swing_')
-                    or c.startswith('Trigger_') or c.startswith('Between_')
-                    or c.startswith('Channel_')]
+                    or c.startswith('Trigger_') or c.startswith('Between_')]
     for extra_col in ('Candles_Between_Swing_And_Entry', 'Candles_Between_Entry_And_Trigger',
                       'N_Candles_Between_Entry_And_Trigger'):
         if extra_col in entry_swing_df.columns:
             feature_cols.append(extra_col)
-
-    # Channel_Match_Quality is categorical and Channel_Touch_Rule_Passes is boolean -- exclude
-    # the former from numeric comparison (it's surfaced separately, see below) and coerce the
-    # latter to 0/1 so it can still be compared like the other numeric features.
-    feature_cols = [c for c in feature_cols if c != 'Channel_Match_Quality']
-    if 'Channel_Touch_Rule_Passes' in entry_swing_df.columns:
-        entry_swing_df = entry_swing_df.copy()
-        entry_swing_df['Channel_Touch_Rule_Passes'] = entry_swing_df['Channel_Touch_Rule_Passes'].astype(float)
 
     winners = entry_swing_df[entry_swing_df['Outcome'] == 'WINNER']
     losers = entry_swing_df[entry_swing_df['Outcome'] == 'LOSER']
@@ -1366,26 +947,10 @@ def find_winner_indicator_patterns(entry_swing_df: pd.DataFrame) -> pd.DataFrame
     return patterns_df
 
 
-def build_channel_match_quality_breakdown(entry_swing_df: pd.DataFrame) -> pd.DataFrame:
-    """Cross-tab of reconstructed-channel match quality ('exact' / 'approximate' / 'unreliable'
-    / 'failed') against trade outcome -- a sanity check on how trustworthy the channel features
-    are, and whether reconstruction confidence itself correlates with winning."""
-    if entry_swing_df.empty or 'Channel_Match_Quality' not in entry_swing_df.columns:
-        return pd.DataFrame()
-
-    tab = pd.crosstab(entry_swing_df['Channel_Match_Quality'], entry_swing_df['Outcome'])
-    tab['Total'] = tab.sum(axis=1)
-    tab['Pct_of_All_Trades'] = (tab['Total'] / tab['Total'].sum() * 100).round(1)
-    return tab.reset_index()
-
-
 def plot_trade_candle_highlight(window_df, entry_idx, trigger_idx, swing_idx, symbol, tf_str,
-                                 trade_id, outcome, save_path, channel_upper_arr=None,
-                                 channel_lower_arr=None, channel_trend_arr=None,
-                                 channel_swing_idx=None, channel_match_quality=None):
+                                 trade_id, outcome, save_path):
     """Renders the candle window with the entry/signal candle (▲), the trigger/fill candle (●),
-    the swing candle (▼), and -- when available -- the reconstructed regression channel
-    (upper/lower bands + trend line, dashed if the match was only 'approximate')."""
+    and the swing candle (▼) highlighted."""
     try:
         plot_df = window_df.copy().set_index('time')[['open', 'high', 'low', 'close', 'volume']]
 
@@ -1404,29 +969,11 @@ def plot_trade_candle_highlight(window_df, entry_idx, trigger_idx, swing_idx, sy
             swing_marker.iloc[swing_idx] = plot_df['high'].iloc[swing_idx] * 1.001
             apds.append(mpf.make_addplot(swing_marker, type='scatter', markersize=140, marker='v', color='magenta'))
 
-        channel_note = ""
-        if channel_upper_arr is not None and channel_lower_arr is not None:
-            n = len(plot_df)
-            linestyle = '--' if channel_match_quality == 'approximate' else '-'
-            upper_series = pd.Series(channel_upper_arr[:n], index=plot_df.index[:len(channel_upper_arr[:n])])
-            lower_series = pd.Series(channel_lower_arr[:n], index=plot_df.index[:len(channel_lower_arr[:n])])
-            apds.append(mpf.make_addplot(upper_series, color='orange', linestyle=linestyle, width=1.2))
-            apds.append(mpf.make_addplot(lower_series, color='orange', linestyle=linestyle, width=1.2))
-            if channel_trend_arr is not None:
-                trend_series = pd.Series(channel_trend_arr[:n], index=plot_df.index[:len(channel_trend_arr[:n])])
-                apds.append(mpf.make_addplot(trend_series, color='gray', linestyle=':', width=0.8))
-            if channel_swing_idx is not None:
-                cs_marker = pd.Series(index=plot_df.index, dtype='float64')
-                cs_marker.iloc[channel_swing_idx] = plot_df['high'].iloc[channel_swing_idx] * 1.002
-                apds.append(mpf.make_addplot(cs_marker, type='scatter', markersize=100, marker='*', color='orange'))
-            quality_label = channel_match_quality or 'unknown'
-            channel_note = f"   ◆ channel band (orange, {quality_label} match"
-
         outcome_label = outcome if outcome else 'UNKNOWN'
         fig, axes = mpf.plot(
             plot_df, type='candle', style='yahoo',
             title=f"{symbol} {tf_str} | Trade #{trade_id} | {outcome_label}\n"
-                  f"(▲ entry/signal candle   ● trigger/fill candle   ▼ swing candle{channel_note})",
+                  f"(▲ entry/signal candle   ● trigger/fill candle   ▼ swing candle)",
             ylabel='Price', addplot=apds, volume=True, figsize=(12, 8), returnfig=True
         )
         fig.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -1451,22 +998,16 @@ def generate_candle_context_charts(chart_windows: dict, output_folder: str):
         save_path = os.path.join(charts_folder, filename)
         if plot_trade_candle_highlight(info['window'], info['entry_idx'], info['trigger_idx'],
                                         info['swing_idx'], info['symbol'], info['tf_str'],
-                                        trade_id, info['outcome'], save_path,
-                                        channel_upper_arr=info.get('channel_upper_arr'),
-                                        channel_lower_arr=info.get('channel_lower_arr'),
-                                        channel_trend_arr=info.get('channel_trend_arr'),
-                                        channel_swing_idx=info.get('channel_swing_idx'),
-                                        channel_match_quality=info.get('channel_match_quality')):
+                                        trade_id, info['outcome'], save_path):
             saved += 1
 
     print(f"Saved {saved} candle-context highlight charts to {charts_folder}")
 
 
 def save_candle_context_excel_report(context_df: pd.DataFrame, entry_swing_df: pd.DataFrame,
-                                      patterns_df: pd.DataFrame, channel_quality_df: pd.DataFrame = None):
-    """Writes the per-candle dataset, the per-trade entry/swing snapshot, the winner-vs-loser
-    indicator comparison (including reconstructed regression-channel features), and the channel
-    match-quality breakdown to their own workbook."""
+                                      patterns_df: pd.DataFrame):
+    """Writes the per-candle dataset, the per-trade entry/swing snapshot, and the winner-vs-loser
+    indicator comparison to their own workbook."""
     if context_df.empty:
         print("No candle-context data to save")
         return
@@ -1481,14 +1022,6 @@ def save_candle_context_excel_report(context_df: pd.DataFrame, entry_swing_df: p
                 entry_swing_df.to_excel(writer, sheet_name="Entry_Swing_Indicators", index=False)
             if not patterns_df.empty:
                 patterns_df.to_excel(writer, sheet_name="Winner_Indicator_Patterns", index=False)
-            if channel_quality_df is not None and not channel_quality_df.empty:
-                channel_quality_df.to_excel(writer, sheet_name="Channel_Match_Quality", index=False)
-            if not entry_swing_df.empty:
-                channel_cols = ['Trade_ID', 'Symbol', 'Timeframe', 'Direction', 'Outcome', 'Profit'] + \
-                                [c for c in entry_swing_df.columns if c.startswith('Channel_')]
-                channel_cols = [c for c in channel_cols if c in entry_swing_df.columns]
-                if len(channel_cols) > 6:
-                    entry_swing_df[channel_cols].to_excel(writer, sheet_name="Channel_Reconstruction", index=False)
 
             header_font = Font(bold=True, color="FFFFFF", size=12)
             header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
@@ -1525,25 +1058,23 @@ def save_candle_context_excel_report(context_df: pd.DataFrame, entry_swing_df: p
 
 
 def run_candle_context_analysis(df: pd.DataFrame):
-    """Orchestrates the full candle-context workflow: build dataset (incl. regression-channel
-    reconstruction) -> summarise -> compare winners vs losers -> save Excel report -> save
-    highlighted charts."""
+    """Orchestrates the full candle-context workflow: build dataset -> summarise -> compare
+    winners vs losers -> save Excel report -> save highlighted charts."""
     if not ENABLE_CANDLE_CONTEXT_ANALYSIS:
         return
 
     print("\n🔬 Running candle-context analysis on completed trades...")
-    context_df, chart_windows, channel_df = build_candle_context_dataset(
+    context_df, chart_windows = build_candle_context_dataset(
         df, lookback=CANDLE_CONTEXT_LOOKBACK, keep_windows_for_charts=CANDLE_CONTEXT_MAX_CHARTS
     )
     if context_df.empty:
         print("⚠️ No candle-context data generated (no MT5 history available for trade entry times?)")
         return
 
-    entry_swing_df = build_entry_swing_summary(context_df, channel_df)
+    entry_swing_df = build_entry_swing_summary(context_df)
     patterns_df = find_winner_indicator_patterns(entry_swing_df)
-    channel_quality_df = build_channel_match_quality_breakdown(entry_swing_df)
 
-    save_candle_context_excel_report(context_df, entry_swing_df, patterns_df, channel_quality_df)
+    save_candle_context_excel_report(context_df, entry_swing_df, patterns_df)
     generate_candle_context_charts(chart_windows, OUTPUT_FOLDER)
 
     if not patterns_df.empty:
@@ -1552,10 +1083,7 @@ def run_candle_context_analysis(df: pd.DataFrame):
             print(f"   {row['Indicator']}: Winners={row['Winners_Mean']} vs Losers={row['Losers_Mean']} "
                   f"(Cohen's d={row['Effect_Size_CohensD']}, stronger in {row['Higher_In']})")
 
-    if not channel_quality_df.empty:
-        print("\n📐 Regression channel reconstruction quality breakdown:")
-        for _, row in channel_quality_df.iterrows():
-            print(f"   {row['Channel_Match_Quality']}: {row['Total']} trades ({row['Pct_of_All_Trades']}%)")
+
 
 def build_outcome_eval_sheet(completed_trades: pd.DataFrame, group_cols: list) -> pd.DataFrame:
     """
@@ -1584,7 +1112,6 @@ def build_outcome_eval_sheet(completed_trades: pd.DataFrame, group_cols: list) -
     sort_ascending = [True] * len(group_cols) + [False]
     result = result.sort_values(by=group_cols + ['Winners'], ascending=sort_ascending).reset_index(drop=True)
     return result
-
 
 def generate_comprehensive_report(df: pd.DataFrame):
     """Generate comprehensive analysis report and save to TXT file"""
