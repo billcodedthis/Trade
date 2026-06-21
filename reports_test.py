@@ -569,7 +569,7 @@ def analyze_strategy_performance():
 
 def compute_candle_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Adds volume, standard-deviation, ATR, RSI, EMA and z-score style indicator columns to a
+    Used to add volume, standard-deviation, ATR, RSI, EMA and z-score style indicator columns to a
     candle dataframe. Expects columns: time, open, high, low, close, volume (or tick_volume),
     sorted ascending by time.
     """
@@ -584,49 +584,6 @@ def compute_candle_indicators(df: pd.DataFrame) -> pd.DataFrame:
     d['lower_wick'] = d[['open', 'close']].min(axis=1) - d['low']
     d['body_pct_of_range'] = (d['body_abs'] / d['range'] * 100).fillna(0)
     d['is_bullish'] = d['close'] > d['open']
-
-    # Rolling standard deviation of closing price (volatility context around the candle)
-    d['std_dev_20'] = d['close'].rolling(window=STD_DEV_WINDOW, min_periods=max(3, STD_DEV_WINDOW // 2)).std()
-
-    # ATR (Wilder's smoothing)
-    prev_close = d['close'].shift(1)
-    true_range = pd.concat([
-        d['high'] - d['low'],
-        (d['high'] - prev_close).abs(),
-        (d['low'] - prev_close).abs()
-    ], axis=1).max(axis=1)
-    d['true_range'] = true_range
-    d['atr_14'] = true_range.ewm(alpha=1 / ATR_WINDOW, min_periods=max(3, ATR_WINDOW // 2), adjust=False).mean()
-
-    # RSI (Wilder's smoothing)
-    delta = d['close'].diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / RSI_WINDOW, min_periods=max(3, RSI_WINDOW // 2), adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / RSI_WINDOW, min_periods=max(3, RSI_WINDOW // 2), adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    d['rsi_14'] = (100 - (100 / (1 + rs))).fillna(50)
-
-    # EMAs and distance from price
-    d['ema_fast'] = d['close'].ewm(span=EMA_FAST, adjust=False).mean()
-    d['ema_slow'] = d['close'].ewm(span=EMA_SLOW, adjust=False).mean()
-    d['dist_from_ema_fast_pct'] = (d['close'] - d['ema_fast']) / d['ema_fast'] * 100
-    d['dist_from_ema_slow_pct'] = (d['close'] - d['ema_slow']) / d['ema_slow'] * 100
-    d['ema_fast_slope'] = d['ema_fast'].diff()
-
-    # Volume behaviour relative to its own recent history
-    vol_sma = d['volume'].rolling(window=STD_DEV_WINDOW, min_periods=max(3, STD_DEV_WINDOW // 2)).mean()
-    vol_std = d['volume'].rolling(window=STD_DEV_WINDOW, min_periods=max(3, STD_DEV_WINDOW // 2)).std()
-    d['volume_zscore_20'] = ((d['volume'] - vol_sma) / vol_std.replace(0, np.nan)).fillna(0)
-
-    # Body / range z-scores (flags abnormally large or small candles vs recent history)
-    body_sma = d['body_abs'].rolling(STD_DEV_WINDOW, min_periods=3).mean()
-    body_std = d['body_abs'].rolling(STD_DEV_WINDOW, min_periods=3).std()
-    d['body_zscore_20'] = ((d['body_abs'] - body_sma) / body_std.replace(0, np.nan)).fillna(0)
-
-    range_sma = d['range'].rolling(STD_DEV_WINDOW, min_periods=3).mean()
-    range_std = d['range'].rolling(STD_DEV_WINDOW, min_periods=3).std()
-    d['range_zscore_20'] = ((d['range'] - range_sma) / range_std.replace(0, np.nan)).fillna(0)
 
     return d
 
@@ -768,10 +725,7 @@ def get_trade_candle_context(symbol, tf_str, signal_time, trigger_time, lookback
 
 CANDLE_SNAPSHOT_COLS = [
     'open', 'high', 'low', 'close', 'volume', 'body', 'body_abs', 'range',
-    'upper_wick', 'lower_wick', 'body_pct_of_range', 'std_dev_20', 'atr_14',
-    'rsi_14', 'ema_fast', 'ema_slow', 'dist_from_ema_fast_pct',
-    'dist_from_ema_slow_pct', 'ema_fast_slope', 'volume_zscore_20',
-    'body_zscore_20', 'range_zscore_20'
+    'upper_wick', 'lower_wick', 'body_pct_of_range', 'is_bullish'
 ]
 
 
@@ -910,65 +864,6 @@ def build_entry_swing_summary(context_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(summaries)
 
 
-def find_winner_indicator_patterns(entry_swing_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compares entry/swing-candle indicator values between WINNER and LOSER trades to surface which
-    indicators differ most consistently for winners (Cohen's d) and how tightly winners cluster
-    together on each one (lower coefficient-of-variation = more similar/repeatable behaviour).
-    """
-    if entry_swing_df.empty:
-        return pd.DataFrame()
-
-    feature_cols = [c for c in entry_swing_df.columns
-                    if c.startswith('Entry_') or c.startswith('Swing_')
-                    or c.startswith('Trigger_') or c.startswith('Between_')]
-    for extra_col in ('Candles_Between_Swing_And_Entry', 'Candles_Between_Entry_And_Trigger',
-                      'N_Candles_Between_Entry_And_Trigger'):
-        if extra_col in entry_swing_df.columns:
-            feature_cols.append(extra_col)
-
-    winners = entry_swing_df[entry_swing_df['Outcome'] == 'WINNER']
-    losers = entry_swing_df[entry_swing_df['Outcome'] == 'LOSER']
-    breakeven = entry_swing_df[entry_swing_df['Outcome'] == 'BREAKEVEN']
-
-    records = []
-    for col in feature_cols:
-        w = pd.to_numeric(winners[col], errors='coerce').dropna()
-        l = pd.to_numeric(losers[col], errors='coerce').dropna()
-        b = pd.to_numeric(breakeven[col], errors='coerce').dropna() if not breakeven.empty else pd.Series(dtype=float)
-
-        if len(w) < 3 or len(l) < 3:
-            continue
-
-        w_mean, w_std = w.mean(), w.std()
-        l_mean, l_std = l.mean(), l.std()
-
-        dof = len(w) + len(l) - 2
-        pooled_std = np.sqrt(((len(w) - 1) * w_std ** 2 + (len(l) - 1) * l_std ** 2) / dof) if dof > 0 else np.nan
-        cohens_d = (w_mean - l_mean) / pooled_std if pooled_std and pooled_std > 0 else np.nan
-        winner_cv = (w_std / abs(w_mean)) if w_mean not in (0, None) and not pd.isna(w_mean) else np.nan
-
-        records.append({
-            'Indicator': col,
-            'Winners_N': len(w),
-            'Winners_Mean': round(w_mean, 4),
-            'Winners_Std': round(w_std, 4),
-            'Losers_N': len(l),
-            'Losers_Mean': round(l_mean, 4),
-            'Losers_Std': round(l_std, 4),
-            'Breakeven_Mean': round(b.mean(), 4) if len(b) else None,
-            'Mean_Difference': round(w_mean - l_mean, 4),
-            'Effect_Size_CohensD': round(cohens_d, 3) if pd.notna(cohens_d) else None,
-            'Winner_Consistency_CV': round(winner_cv, 3) if pd.notna(winner_cv) else None,
-            'Higher_In': 'Winners' if w_mean > l_mean else 'Losers',
-        })
-
-    patterns_df = pd.DataFrame(records)
-    if not patterns_df.empty:
-        patterns_df['Abs_Effect_Size'] = patterns_df['Effect_Size_CohensD'].abs()
-        patterns_df = patterns_df.sort_values('Abs_Effect_Size', ascending=False) \
-                                  .drop(columns='Abs_Effect_Size').reset_index(drop=True)
-    return patterns_df
 
 
 def plot_trade_candle_highlight(window_df, entry_idx, trigger_idx, swing_idx, symbol, tf_str,
@@ -1028,8 +923,7 @@ def generate_candle_context_charts(chart_windows: dict, output_folder: str):
     print(f"Saved {saved} candle-context highlight charts to {charts_folder}")
 
 
-def save_candle_context_excel_report(context_df: pd.DataFrame, entry_swing_df: pd.DataFrame,
-                                      patterns_df: pd.DataFrame):
+def save_candle_context_excel_report(context_df: pd.DataFrame, entry_swing_df: pd.DataFrame):
     """Writes the per-candle dataset, the per-trade entry/swing snapshot, and the winner-vs-loser
     indicator comparison to their own workbook."""
     if context_df.empty:
@@ -1044,9 +938,7 @@ def save_candle_context_excel_report(context_df: pd.DataFrame, entry_swing_df: p
             context_df.to_excel(writer, sheet_name="Trade_Candle_Context", index=False)
             if not entry_swing_df.empty:
                 entry_swing_df.to_excel(writer, sheet_name="Entry_Swing_Indicators", index=False)
-            if not patterns_df.empty:
-                patterns_df.to_excel(writer, sheet_name="Winner_Indicator_Patterns", index=False)
-
+            
             header_font = Font(bold=True, color="FFFFFF", size=12)
             header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
             thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
@@ -1096,16 +988,11 @@ def run_candle_context_analysis(df: pd.DataFrame):
         return
 
     entry_swing_df = build_entry_swing_summary(context_df)
-    patterns_df = find_winner_indicator_patterns(entry_swing_df)
 
-    save_candle_context_excel_report(context_df, entry_swing_df, patterns_df)
-    generate_candle_context_charts(chart_windows, OUTPUT_FOLDER)
+    save_candle_context_excel_report(context_df, entry_swing_df)
+    #generate_candle_context_charts(chart_windows, OUTPUT_FOLDER)
 
-    if not patterns_df.empty:
-        print("\n🏆 Indicators most associated with WINNING trades (top 10 by effect size):")
-        for _, row in patterns_df.head(10).iterrows():
-            print(f"   {row['Indicator']}: Winners={row['Winners_Mean']} vs Losers={row['Losers_Mean']} "
-                  f"(Cohen's d={row['Effect_Size_CohensD']}, stronger in {row['Higher_In']})")
+   
 
 
 
