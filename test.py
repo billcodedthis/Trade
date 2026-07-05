@@ -14,7 +14,7 @@ import requests
 import re
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv() 
 
 MT5_PATH = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 if not mt5.initialize(path=MT5_PATH):
