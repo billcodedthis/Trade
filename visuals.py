@@ -55,6 +55,13 @@ M15_BS=Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major
 M15_pen= Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M15_pl= []
 
+TIMEFRAME_M30= Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M30_B= []
+M30_S=[]
+M30_BS=Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M30_pen= Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M30_pl= []
+
 TIMEFRAME_M5= Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M5_S=[]
 M5_B= []
@@ -91,7 +98,8 @@ zone_last_loaded ={}
 ZONE_RELOAD_CONFIG = {
         mt5.TIMEFRAME_M1: timedelta(hours=12),    # M1 uses M5 zones which should reload every 12 hours
         mt5.TIMEFRAME_M5: timedelta(days=1),      # M5 uses M15 zones which should reload daily
-        mt5.TIMEFRAME_M15: timedelta(days=5),       # M15 uses H1 zones which should reload every 5 days
+        mt5.TIMEFRAME_M15: timedelta(days=3),       # M15 uses M30 zones which should reload every 3 days
+        mt5.TIMEFRAME_M30: timedelta(days=5),       # M30 uses H1 zones which should reload every 5 days
         mt5.TIMEFRAME_H1: timedelta(days=7),       # H1 uses H4 zones which should  reload weekly
     }
 
@@ -638,6 +646,23 @@ def update_channel_data(symbol,timeframe):
                             del active_channels[(symbol,timeframe)]
                             break# Skip further processing this round
 
+            elif timeframe == mt5.TIMEFRAME_M30:
+                if symbol in M30_B:
+                    if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in M30_BS:
+                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 and broke_below):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+                elif symbol in M30_S:
+                        if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
+                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                            del active_channels[(symbol,timeframe)]
+                            break# Skip further processing this round
+
             elif timeframe == mt5.TIMEFRAME_M5:
                 if symbol in M5_B:
                     if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
@@ -1079,27 +1104,109 @@ def detect_break(df, symbol,timeframe):
         if (symbol, timeframe) in levels:
             del levels[(symbol,timeframe)]
 
+def is_rejection_candle(df, idx, is_low):
+    """
+    Checks whether the candle at `idx` shows a pin-bar / rejection wick at its
+    low (is_low=True, used for BUY swing points) or its high (is_low=False,
+    used for SELL swing points). A rejection candle is one where the wick on
+    the relevant side dominates the candle's range and dwarfs the body,
+    signalling price was pushed to an extreme and rejected back.
+    """
+    if idx < 0 or idx >= len(df):
+        return False
+    o = df['open'].iloc[idx]
+    c = df['close'].iloc[idx]
+    h = df['high'].iloc[idx]
+    l = df['low'].iloc[idx]
+    candle_range = h - l
+    if candle_range <= 0:
+        return False
+    body = abs(c - o)
+    wick = (min(o, c) - l) if is_low else (h - max(o, c))
+    # Pin-bar style rejection: wick makes up at least half the candle's range
+    # and is clearly larger than the body itself.
+    return wick >= candle_range * 0.5 and wick >= body * 1.5
+
+def find_rejection_index(df, anchor_idx, is_low):
+    """
+    Given a candidate swing-anchor index (an opposite-colored candle),
+    resolves which specific candle actually carries the rejection wick - the
+    true pin bar. Checks the anchor candle itself first, then the candle
+    immediately before it, then the candle immediately after it, and returns
+    the index of whichever one qualifies (the pin bar can be a different
+    candle than the anchor itself). Returns None if none of the three show
+    a rejection.
+    """
+    if is_rejection_candle(df, anchor_idx, is_low):
+        return anchor_idx
+    if is_rejection_candle(df, anchor_idx - 1, is_low):
+        return anchor_idx - 1
+    if is_rejection_candle(df, anchor_idx + 1, is_low):
+        return anchor_idx + 1
+    return None
+
+def swing_point_is_turning_point(df, swing_idx, entry_idx, is_buy):
+    """
+    True if the candidate swing anchor qualifies as a turning point - i.e.
+    find_rejection_index finds a rejection wick at the anchor itself or
+    either immediate neighbor.
+    """
+    return find_rejection_index(df, swing_idx, is_buy) is not None
+
+def find_valid_swing_point(df, entry_idx, is_buy):
+    """
+    Searches backward from the candle immediately before entry for the
+    nearest opposite-colored candle that qualifies as a turning-point anchor,
+    then resolves that anchor to whichever candle actually carries the
+    rejection wick (the pin bar) - which may be the anchor itself, or the
+    candle immediately before/after it (see find_rejection_index). If the
+    nearest anchor doesn't qualify, keeps searching further back rather than
+    discarding the setup outright - candles that aren't opposite-colored are
+    skipped over (never considered as an anchor), but the search continues
+    all the way back to the first candle available in `df` (the same range
+    the original nearest-opposite-candle search already covered - no new
+    limit is introduced, it just no longer stops at the first failure).
+    Returns the index of the pin bar candle - this is the actual swing point
+    used for risk/SL/TP and for the run-up check to entry - or None if no
+    qualifying anchor is found anywhere in range.
+    """
+    is_low = is_buy
+    entry_bullish = df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx]
+    for i in range(entry_idx, 0, -1):
+        candle_bullish = df['close'].iloc[i] > df['open'].iloc[i]
+        is_opposite = (entry_bullish and not candle_bullish) or ((not entry_bullish) and candle_bullish)
+        if not is_opposite:
+            continue
+        pin_bar_idx = find_rejection_index(df, i, is_low)
+        if pin_bar_idx is not None:
+            return pin_bar_idx
+    return None
+
 def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
     if entry_idx is None:
         return None
     entry_price = df['close'].iloc[entry_idx]
-    last_opposite_idx = None
-    
-    # Find the last opposite-colored candle before entry
-    for i in range(entry_idx , 0, -1):
-        if (df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx] and df['close'].iloc[i] < df['open'].iloc[i]) or \
-           (df['close'].iloc[entry_idx] < df['open'].iloc[entry_idx] and df['close'].iloc[i] > df['open'].iloc[i]):
-            last_opposite_idx = i
-            break
-    
-    if last_opposite_idx is None:
-        return None
-    
-    # Get the swing point (low for buys, high for sells)
-    is_buy = df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx]
-    swing_point = df['low'].iloc[last_opposite_idx] if is_buy else df['high'].iloc[last_opposite_idx]
 
-    for i in range(last_opposite_idx+1,entry_idx+1):
+    # Get the swing point (low for buys, high for sells) - anchored to
+    # whichever candle actually carries the rejection wick (the pin bar),
+    # which may not be the same candle as the opposite-colored anchor that
+    # was used to find it.
+    is_buy = df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx]
+    pin_bar_idx = find_valid_swing_point(df, entry_idx, is_buy)
+
+    if pin_bar_idx is None:
+        print(f"{symbol} {timeframe}channel: no valid rejection swing point found - deleting channel")
+        if (symbol, timeframe) in active_channels:
+            del active_channels[(symbol,timeframe)]
+        if (symbol, timeframe) in levels:
+            del levels[(symbol,timeframe)]
+        return None
+
+    swing_point = df['low'].iloc[pin_bar_idx] if is_buy else df['high'].iloc[pin_bar_idx]
+
+    # Between the pin bar and the entry candle, no candle may push its wick
+    # past the pin bar's own wick in the relevant direction.
+    for i in range(pin_bar_idx+1,entry_idx+1):
         if is_buy:
             if df['low'].iloc[i] < swing_point:
                 print(f"{symbol} {timeframe}channel didn't meet the entry criteria")
@@ -1586,6 +1693,30 @@ def del_completed():
                         print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
                         continue  # Skip TP check since we already hit SL
 
+            elif timeframe== mt5.TIMEFRAME_M30:
+                if symbol in M30_pen :
+                    if (direction == "BUY" and crossed_sl) or (direction == "SELL" and crossed_sl):
+                        start_cooldown(symbol, timeframe)
+                        # Hit SL - delete channel and levels
+                        if (symbol, timeframe) in active_channels:
+                            send_telegram_message(f"🚨 {symbol} {direction}  hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            del active_channels[(symbol,timeframe)]
+                        if (symbol, timeframe) in levels:
+                            del levels[(symbol,timeframe)]
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
+                        continue  # Skip TP check since we already hit SL
+                elif symbol in M30_pl:
+                    if (direction == "BUY" and crossed_sl1) or (direction == "SELL" and crossed_sl1):
+                        start_cooldown(symbol, timeframe)
+                        # Hit SL - delete channel and levels
+                        if (symbol, timeframe) in active_channels:
+                            send_telegram_message(f"🚨 {symbol}  {direction} hit Deriv SL on {timeframe_to_str(timeframe)}")
+                            del active_channels[(symbol,timeframe)]
+                        if (symbol, timeframe) in levels:
+                            del levels[(symbol,timeframe)]
+                        print(f"🚨 {symbol} {direction}  hit SL - channel removed.")
+                        continue  # Skip TP check since we already hit SL
+
             elif timeframe== mt5.TIMEFRAME_H1:
                 if symbol in H1_pen :
                     if (direction == "BUY" and crossed_sl) or (direction == "SELL" and crossed_sl):
@@ -2022,10 +2153,14 @@ def check_conflicting_slopes():
     timeframe_combinations = [
         (mt5.TIMEFRAME_M1, mt5.TIMEFRAME_M5),
         (mt5.TIMEFRAME_M1, mt5.TIMEFRAME_M15),
+        (mt5.TIMEFRAME_M1, mt5.TIMEFRAME_M30),
         (mt5.TIMEFRAME_M1, mt5.TIMEFRAME_H1),
         (mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15),
+        (mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M30),
         (mt5.TIMEFRAME_M5, mt5.TIMEFRAME_H1), 
-        (mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1)
+        (mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M30),
+        (mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1),
+        (mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1)
     ]
     
     # Find symbols that exist in multiple timeframes
@@ -2103,9 +2238,10 @@ def check_extend_active_tp_from_higher_tf(symbol, direction, timeframe):
     
     # Define higher timeframes for each current timeframe
     higher_timeframes = {
-        mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5,mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1],
-        mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1],
-        mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],
+        mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5,mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1],
+        mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1],
+        mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1],
+        mt5.TIMEFRAME_M30: [mt5.TIMEFRAME_H1],
         mt5.TIMEFRAME_H1: []  # No higher timeframe than H1
     }
     
@@ -2220,6 +2356,7 @@ def update_profit_tracking():
         "M1": timedelta(minutes=48),
         "M5": timedelta(minutes=240),    
         "M15": timedelta(minutes=720),     
+        "M30": timedelta(hours=24),
         "H1": timedelta(hours=48),     
     }
     DEFAULT_PROFIT_DURATION= timedelta(hours=48)
@@ -2428,7 +2565,8 @@ def check_a_plus_setup(symbol,df, trend_slope, current_timeframe):
         timeframe_map = {
             mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5],
             mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],
-            mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],
+            mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_M30],
+            mt5.TIMEFRAME_M30: [mt5.TIMEFRAME_H1],
             mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]
         }
         
@@ -2521,18 +2659,19 @@ def preload_supply_demand_zones():
     global supply_demand_zones, zone_last_loaded,ZONE_RELOAD_CONFIG
     
     # Get all symbols from your configuration
-    all_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5 +TIMEFRAME_M1)
+    all_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M30 + TIMEFRAME_M15 + TIMEFRAME_M5 +TIMEFRAME_M1)
     
     # Define which higher timeframe to use for each trading timeframe
     timeframe_map = {
         mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5],
         mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],  # For M5 trades: Use M15 zones
-        mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],  # For M15 trades: Use H1 zones
+        mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_M30], # For M15 trades: Use M30 zones
+        mt5.TIMEFRAME_M30: [mt5.TIMEFRAME_H1],  # For M30 trades: Use H1 zones
         mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]    # For H1 trades: Use H4 zones
     }
     
     # Trading timeframes we actually use
-    trading_timeframes = [mt5.TIMEFRAME_M1,mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1]
+    trading_timeframes = [mt5.TIMEFRAME_M1,mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1]
     
     print("🔄 Preloading supply-demand zones for all timeframe combinations...")
     
@@ -2590,7 +2729,8 @@ def should_reload_zones():
     timeframe_map = {
         mt5.TIMEFRAME_M1: [mt5.TIMEFRAME_M5],
         mt5.TIMEFRAME_M5: [mt5.TIMEFRAME_M15],  # For M5 trades: Use M15 zones
-        mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_H1],  # For M15 trades: Use H1 zones
+        mt5.TIMEFRAME_M15: [mt5.TIMEFRAME_M30], # For M15 trades: Use M30 zones
+        mt5.TIMEFRAME_M30: [mt5.TIMEFRAME_H1],  # For M30 trades: Use H1 zones
         mt5.TIMEFRAME_H1: [mt5.TIMEFRAME_H4]    # For H1 trades: Use H4 zones
     }
     
@@ -2710,7 +2850,7 @@ while True:
         check_engulfing_before_tp1_for_breakeven_trades()
         active=[]
 
-        active_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M5 + TIMEFRAME_M1)
+        active_symbols = set(TIMEFRAME_H1 + TIMEFRAME_M15 + TIMEFRAME_M30 + TIMEFRAME_M5 + TIMEFRAME_M1)
         for symbol in active_symbols:
             positions = mt5.positions_get(symbol=symbol) or []
             orders = mt5.orders_get(symbol=symbol) or []
@@ -2891,6 +3031,94 @@ while True:
                                     if symbol in M15_pen :
                                         pending(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl'], fib_levels['tp2'],fib_levels['sniper'],timeframe)
                                     elif symbol in M15_pl:
+                                        place_trade(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl1'], fib_levels['tp2'],timeframe)
+                if (symbol, timeframe) in levels :
+                    L =levels[(symbol,timeframe)]
+                    check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
+                else:
+                    positions = mt5.positions_get(symbol=symbol)
+                    if positions is not None:
+                        for position in positions:
+                            if position.magic != timeframe:
+                                continue
+                            check_tp1_and_manage_trades(symbol, position.comment, timeframe)
+                close_pending(symbol)
+
+        for symbol in TIMEFRAME_M30 :
+                timeframe = mt5.TIMEFRAME_M30
+                if is_cooldown_active(symbol, timeframe):
+                    continue
+                if (symbol, timeframe) not in active_channels:
+                    num_bars = [40,50,60,70,80]
+                    for i in num_bars:
+                        candles = get_candles(symbol, timeframe, i)
+                        if candles.empty:
+                            continue
+                        channel  = detect_regression_channel(candles,symbol,timeframe)
+                        if channel is not None and channel[0] == True and channel[2]==True:
+                            # Save channel and breakout info
+                            active_channels[(symbol,timeframe)] = {
+                                    "df": channel[1].copy(),
+                                    "breakout_idx": None,
+                                    "last_touch_idx": None,
+                                    "last_touch_price":None,
+                                    "num_bars":i,
+                                    "timeframe":timeframe,
+                                    "last_time" :channel[1]['time'].iloc[-2],
+                                    "a_plus_setup": channel[2]  # Add the A+ setup flag
+                            }
+                            df = active_channels[(symbol,timeframe)]["df"]
+                            last = df.iloc[-10:]
+                            last_trend = df['trend']     
+                            trend_slope = last_trend.iloc[-1] - last_trend.iloc[0]
+                            for i in range(len(last)):
+                                candle = last.iloc[i]
+                                upper_at_i = last['upper'].iloc[i]
+                                lower_at_i = last['lower'].iloc[i]
+                                
+                                broke_above = candle['high'] > upper_at_i
+                                broke_below = candle['low'] < lower_at_i
+
+                                # Breakout matches trend direction? Then delete
+                                if symbol in M30_B:
+                                    if (trend_slope > 0 ) or (trend_slope < 0 and broke_below):
+                                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                                            del active_channels[(symbol,timeframe)]
+                                            break# Skip further processing this round
+                                elif symbol in M30_BS:
+                                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 and broke_below):
+                                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                                            del active_channels[(symbol,timeframe)]
+                                            break# Skip further processing this round
+                                elif symbol in M30_S:
+                                    if (trend_slope > 0  and broke_above) or (trend_slope < 0 ):
+                                            print(f"🚨 {symbol}_{timeframe_to_str(timeframe)} broke out in the direction of the trend — clearing it.")
+                                            del active_channels[(symbol,timeframe)]
+                                            break# Skip further processing this round
+                            break
+                
+                else:
+                        update_channel_data(symbol,timeframe)
+                        if (symbol, timeframe) not in active_channels:
+                            continue
+                        candles = active_channels[(symbol,timeframe)]["df"]
+                        detect_break(candles, symbol,timeframe)
+                        if (symbol, timeframe) not in active_channels:
+                            continue
+                        breakout_idx = active_channels[(symbol,timeframe)]['breakout_idx']
+                        last_touch_idx = active_channels[(symbol,timeframe)]['last_touch_idx']
+                        entry_idx = find_valid_entry(candles, breakout_idx, last_touch_idx,symbol,timeframe)
+                        if (symbol, timeframe) not in active_channels:
+                            continue
+                        if entry_idx:
+                            fib_levels = apply_fibonacci_levels(symbol,entry_idx, candles,timeframe)
+                            if (symbol, timeframe) not in active_channels:
+                                continue
+                            if fib_levels:
+                                    direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
+                                    if symbol in M30_pen :
+                                        pending(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl'], fib_levels['tp2'],fib_levels['sniper'],timeframe)
+                                    elif symbol in M30_pl:
                                         place_trade(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl1'], fib_levels['tp2'],timeframe)
                 if (symbol, timeframe) in levels :
                     L =levels[(symbol,timeframe)]

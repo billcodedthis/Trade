@@ -45,6 +45,19 @@ active_trades={}
 cooldown = {} 
 profit_tracking = {}  
 
+# ==================== DRAWDOWN PROTECTION ====================
+WEEKLY_LOSS_LIMIT_PCT = 15.0   # Block new entries if account balance drops this % vs start of week
+MONTHLY_LOSS_LIMIT_PCT = 30.0  # Block new entries if account balance drops this % vs start of month
+
+risk_state = {
+    'week_start_balance': None,
+    'week_key': None,        # (ISO year, ISO week number)
+    'month_start_balance': None,
+    'month_key': None,       # (year, month)
+    'weekly_blocked': False,
+    'monthly_blocked': False,
+}
+
 DOWNLOADS_FOLDER = str(Path.home() / "OneDrive - University of Ghana")
 PLOTS_FOLDER = os.path.join(DOWNLOADS_FOLDER, "MT5_Regression_Channels_real_exness")
 
@@ -984,27 +997,109 @@ def detect_break(df, symbol,timeframe):
         if (symbol, timeframe) in levels:
             del levels[(symbol,timeframe)]
 
+def is_rejection_candle(df, idx, is_low):
+    """
+    Checks whether the candle at `idx` shows a pin-bar / rejection wick at its
+    low (is_low=True, used for BUY swing points) or its high (is_low=False,
+    used for SELL swing points). A rejection candle is one where the wick on
+    the relevant side dominates the candle's range and dwarfs the body,
+    signalling price was pushed to an extreme and rejected back.
+    """
+    if idx < 0 or idx >= len(df):
+        return False
+    o = df['open'].iloc[idx]
+    c = df['close'].iloc[idx]
+    h = df['high'].iloc[idx]
+    l = df['low'].iloc[idx]
+    candle_range = h - l
+    if candle_range <= 0:
+        return False
+    body = abs(c - o)
+    wick = (min(o, c) - l) if is_low else (h - max(o, c))
+    # Pin-bar style rejection: wick makes up at least half the candle's range
+    # and is clearly larger than the body itself.
+    return wick >= candle_range * 0.5 and wick >= body * 1.5
+
+def find_rejection_index(df, anchor_idx, is_low):
+    """
+    Given a candidate swing-anchor index (an opposite-colored candle),
+    resolves which specific candle actually carries the rejection wick - the
+    true pin bar. Checks the anchor candle itself first, then the candle
+    immediately before it, then the candle immediately after it, and returns
+    the index of whichever one qualifies (the pin bar can be a different
+    candle than the anchor itself). Returns None if none of the three show
+    a rejection.
+    """
+    if is_rejection_candle(df, anchor_idx, is_low):
+        return anchor_idx
+    if is_rejection_candle(df, anchor_idx - 1, is_low):
+        return anchor_idx - 1
+    if is_rejection_candle(df, anchor_idx + 1, is_low):
+        return anchor_idx + 1
+    return None
+
+def swing_point_is_turning_point(df, swing_idx, entry_idx, is_buy):
+    """
+    True if the candidate swing anchor qualifies as a turning point - i.e.
+    find_rejection_index finds a rejection wick at the anchor itself or
+    either immediate neighbor.
+    """
+    return find_rejection_index(df, swing_idx, is_buy) is not None
+
+def find_valid_swing_point(df, entry_idx, is_buy):
+    """
+    Searches backward from the candle immediately before entry for the
+    nearest opposite-colored candle that qualifies as a turning-point anchor,
+    then resolves that anchor to whichever candle actually carries the
+    rejection wick (the pin bar) - which may be the anchor itself, or the
+    candle immediately before/after it (see find_rejection_index). If the
+    nearest anchor doesn't qualify, keeps searching further back rather than
+    discarding the setup outright - candles that aren't opposite-colored are
+    skipped over (never considered as an anchor), but the search continues
+    all the way back to the first candle available in `df` (the same range
+    the original nearest-opposite-candle search already covered - no new
+    limit is introduced, it just no longer stops at the first failure).
+    Returns the index of the pin bar candle - this is the actual swing point
+    used for risk/SL/TP and for the run-up check to entry - or None if no
+    qualifying anchor is found anywhere in range.
+    """
+    is_low = is_buy
+    entry_bullish = df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx]
+    for i in range(entry_idx, 0, -1):
+        candle_bullish = df['close'].iloc[i] > df['open'].iloc[i]
+        is_opposite = (entry_bullish and not candle_bullish) or ((not entry_bullish) and candle_bullish)
+        if not is_opposite:
+            continue
+        pin_bar_idx = find_rejection_index(df, i, is_low)
+        if pin_bar_idx is not None:
+            return pin_bar_idx
+    return None
+
 def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
     if entry_idx is None:
         return None
     entry_price = df['close'].iloc[entry_idx]
-    last_opposite_idx = None
-    
-    # Find the last opposite-colored candle before entry
-    for i in range(entry_idx , 0, -1):
-        if (df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx] and df['close'].iloc[i] < df['open'].iloc[i]) or \
-           (df['close'].iloc[entry_idx] < df['open'].iloc[entry_idx] and df['close'].iloc[i] > df['open'].iloc[i]):
-            last_opposite_idx = i
-            break
-    
-    if last_opposite_idx is None:
-        return None
-    
-    # Get the swing point (low for buys, high for sells)
-    is_buy = df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx]
-    swing_point = df['low'].iloc[last_opposite_idx] if is_buy else df['high'].iloc[last_opposite_idx]
 
-    for i in range(last_opposite_idx+1,entry_idx+1):
+    # Get the swing point (low for buys, high for sells) - anchored to
+    # whichever candle actually carries the rejection wick (the pin bar),
+    # which may not be the same candle as the opposite-colored anchor that
+    # was used to find it.
+    is_buy = df['close'].iloc[entry_idx] > df['open'].iloc[entry_idx]
+    pin_bar_idx = find_valid_swing_point(df, entry_idx, is_buy)
+
+    if pin_bar_idx is None:
+        print(f"{symbol} {timeframe}channel: no valid rejection swing point found - deleting channel")
+        if (symbol, timeframe) in active_channels:
+            del active_channels[(symbol,timeframe)]
+        if (symbol, timeframe) in levels:
+            del levels[(symbol,timeframe)]
+        return None
+
+    swing_point = df['low'].iloc[pin_bar_idx] if is_buy else df['high'].iloc[pin_bar_idx]
+
+    # Between the pin bar and the entry candle, no candle may push its wick
+    # past the pin bar's own wick in the relevant direction.
+    for i in range(pin_bar_idx+1,entry_idx+1):
         if is_buy:
             if df['low'].iloc[i] < swing_point:
                 print(f"{symbol} {timeframe}channel didn't meet the entry criteria")
@@ -1125,6 +1220,9 @@ def adjust_lot_for_risk(symbol, direction, entry_price, sl, initial_volume):
     return None
 
 def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
+    if is_trading_blocked():
+        print(f"⛔ Drawdown protection active: not placing pending {direction} order for {symbol}")
+        return
     if is_time_restricted(symbol):
         print(f"⛔ Weekend restriction: Not placing pending {direction} order for {symbol}")
         if (symbol, timeframe) in active_channels:
@@ -1177,6 +1275,9 @@ def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
         print(f"{symbol}, pending {direction}@{entry_price} sl:{sl},tp:{tp} failed: {order.comment}")
 
 def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
+    if is_trading_blocked():
+        print(f"⛔ Drawdown protection active: not placing {direction} market trade for {symbol}")
+        return
     if is_time_restricted(symbol):
         print(f"⛔ Weekend restriction: Not placing {direction} market trade for {symbol}")
         if (symbol, timeframe) in active_channels:
@@ -2074,6 +2175,122 @@ def is_cooldown_active(symbol: str, timeframe: int) -> bool:
         return False
     return True
 
+def _current_week_key(now):
+    iso = now.isocalendar()
+    return (iso[0], iso[1])  # (ISO year, ISO week number)
+
+def _current_month_key(now):
+    return (now.year, now.month)
+
+def initialize_risk_tracking():
+    """Sets the weekly/monthly reference balances used for drawdown tracking.
+    Called once at startup, and again internally whenever a new week/month begins."""
+    account = mt5.account_info()
+    if account is None:
+        print("⚠️ Could not read account info to initialize drawdown tracking.")
+        return
+    now = datetime.now()
+    balance = account.balance
+    risk_state['week_start_balance'] = balance
+    risk_state['week_key'] = _current_week_key(now)
+    risk_state['month_start_balance'] = balance
+    risk_state['month_key'] = _current_month_key(now)
+    risk_state['weekly_blocked'] = False
+    risk_state['monthly_blocked'] = False
+    print(f"📊 Drawdown tracking initialized. Balance: {balance:.2f}")
+
+def is_trading_blocked():
+    """True if either the weekly or monthly drawdown limit has been hit and not yet reset."""
+    return risk_state.get('weekly_blocked', False) or risk_state.get('monthly_blocked', False)
+
+def close_all_pending_orders(reason=""):
+    """Closes every resting pending order across all symbols (used when a drawdown limit is hit)."""
+    orders = mt5.orders_get()
+    if not orders:
+        return
+    for order in orders:
+        request = {
+            "action": mt5.TRADE_ACTION_REMOVE,
+            "order": order.ticket,
+        }
+        result = mt5.order_send(request)
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            print(f"✅ Closed pending order {order.ticket} for {order.symbol} ({reason})")
+            key = (order.symbol, order.magic)
+            if key in active_channels:
+                del active_channels[key]
+            if key in levels:
+                del levels[key]
+        else:
+            comment = result.comment if result else "no response"
+            print(f"❌ Failed to close pending order {order.ticket} for {order.symbol}: {comment}")
+
+def update_drawdown_protection():
+    """
+    Tracks weekly/monthly account loss against the balance recorded at the start
+    of each period. If loss meets/exceeds the configured threshold, blocks new
+    entries and closes all pending orders until the next period begins, at
+    which point tracking resets and new entries are allowed again. A Telegram
+    alert is sent both when a limit is hit and when the block resets.
+    """
+    account = mt5.account_info()
+    if account is None:
+        return
+    now = datetime.now()
+    balance = account.balance
+
+    if risk_state['week_start_balance'] is None or risk_state['month_start_balance'] is None:
+        initialize_risk_tracking()
+        return
+
+    # --- Weekly rollover ---
+    week_key = _current_week_key(now)
+    if week_key != risk_state['week_key']:
+        if risk_state['weekly_blocked']:
+            send_telegram_message("✅ <b>Weekly drawdown block reset</b>\nNew entries are allowed again.")
+            print("✅ Weekly drawdown block reset - new entries allowed again.")
+        risk_state['week_key'] = week_key
+        risk_state['week_start_balance'] = balance
+        risk_state['weekly_blocked'] = False
+        print(f"📅 New week started - weekly drawdown reference reset to {balance:.2f}")
+
+    # --- Monthly rollover ---
+    month_key = _current_month_key(now)
+    if month_key != risk_state['month_key']:
+        if risk_state['monthly_blocked']:
+            send_telegram_message("✅ <b>Monthly drawdown block reset</b>\nNew entries are allowed again.")
+            print("✅ Monthly drawdown block reset - new entries allowed again.")
+        risk_state['month_key'] = month_key
+        risk_state['month_start_balance'] = balance
+        risk_state['monthly_blocked'] = False
+        print(f"📅 New month started - monthly drawdown reference reset to {balance:.2f}")
+
+    # --- Weekly loss check ---
+    week_start_balance = risk_state['week_start_balance']
+    if week_start_balance and week_start_balance > 0:
+        weekly_loss_pct = (week_start_balance - balance) / week_start_balance * 100
+        if weekly_loss_pct >= WEEKLY_LOSS_LIMIT_PCT and not risk_state['weekly_blocked']:
+            risk_state['weekly_blocked'] = True
+            print(f"🛑 Weekly drawdown limit hit: -{weekly_loss_pct:.2f}%")
+            send_telegram_message(
+                f"🛑 <b>Weekly drawdown limit hit</b>\nLoss: -{weekly_loss_pct:.2f}% (limit {WEEKLY_LOSS_LIMIT_PCT}%)\n"
+                f"Blocking new entries and closing all pending orders until next week."
+            )
+            close_all_pending_orders(reason="weekly drawdown limit")
+
+    # --- Monthly loss check ---
+    month_start_balance = risk_state['month_start_balance']
+    if month_start_balance and month_start_balance > 0:
+        monthly_loss_pct = (month_start_balance - balance) / month_start_balance * 100
+        if monthly_loss_pct >= MONTHLY_LOSS_LIMIT_PCT and not risk_state['monthly_blocked']:
+            risk_state['monthly_blocked'] = True
+            print(f"🛑 Monthly drawdown limit hit: -{monthly_loss_pct:.2f}%")
+            send_telegram_message(
+                f"🛑 <b>Monthly drawdown limit hit</b>\nLoss: -{monthly_loss_pct:.2f}% (limit {MONTHLY_LOSS_LIMIT_PCT}%)\n"
+                f"Blocking new entries and closing all pending orders until next month."
+            )
+            close_all_pending_orders(reason="monthly drawdown limit")
+
 def check_a_plus_setup(symbol,df, trend_slope, current_timeframe):
     """
     Check if channel qualifies for A+ setup based on supply/demand zones
@@ -2264,6 +2481,7 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 clear_plots_folder()
+initialize_risk_tracking()
 
 
 send_telegram_message("Exness Bot running")
@@ -2289,6 +2507,7 @@ while True:
         if zone_last_loaded is None or should_reload_zones():
             print("🔄 Initializing supply/demand zones...")
             preload_supply_demand_zones()
+        update_drawdown_protection()
         clean_manual_deleted()
         monitor_breakeven_trades()
         monitor_active_trades()
