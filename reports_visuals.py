@@ -308,6 +308,10 @@ def analyze_pending_orders_enhanced():
         symbol = order['symbol']
         magic = order['magic']
         tf_str = TIMEFRAMES.get(magic, f"TF{magic}")
+        if tf_str == "M1":
+            # M1 trading is deactivated in visuals.py - exclude any M1 history from reports
+            processed_count += 1
+            continue
         direction = "BUY" if order['type'] in [2, 4] else "SELL"
         
         # Safe conversion
@@ -445,6 +449,9 @@ def analyze_completed_trades():
         symbol = entry.get('symbol', 'Unknown')
         magic = int(entry.get('magic', 0)) if entry.get('magic') is not None else 0
         timeframe_str = TIMEFRAMES.get(magic, f"Unknown({magic})")
+        if timeframe_str == "M1":
+            # M1 trading is deactivated in visuals.py - exclude any M1 history from reports
+            continue
         
         direction = "BUY" if entry['type'] == 0 else "SELL"
         volume = safe_float_conversion(entry.get('volume', 0))

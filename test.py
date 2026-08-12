@@ -2889,7 +2889,7 @@ def preload_supply_demand_zones():
     }
     
     # Trading timeframes we actually use
-    trading_timeframes = [mt5.TIMEFRAME_M1,mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1]
+    trading_timeframes = [mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1]# M1 deactivated - no need to preload its zones
     
     print("🔄 Preloading supply-demand zones for all timeframe combinations...")
     

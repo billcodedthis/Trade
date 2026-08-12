@@ -69,11 +69,18 @@ M5_BS=Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+
 M5_pen= Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Forex_Major+Forex_Minor+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
 M5_pl= []
 
-TIMEFRAME_M1 = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+
+# M1 trading deactivated: all lists emptied so the M1 loop in the main trading
+# loop becomes a no-op (no channel detection, no entries). Repopulate these
+# from the commented-out originals below to re-enable M1 trading.
+# TIMEFRAME_M1 = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+# M1_BS = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+# M1_pen = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+TIMEFRAME_M1 = []
 M1_S =[]
 M1_B= []
-M1_BS = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
-M1_pen = Basket_Indices+Crash_Boom_Indices+Crypto+DEX_Indices+Energies+Jump_Indices+Metals+Multi_Step_Indices+Range_Break+Skewed_Step+Step_Indices+Stock_Indices+Volatility_Indices
+M1_BS = []
+M1_pen = []
 M1_pl = []
 
 active_channels = {}
@@ -2671,7 +2678,7 @@ def preload_supply_demand_zones():
     }
     
     # Trading timeframes we actually use
-    trading_timeframes = [mt5.TIMEFRAME_M1,mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1]
+    trading_timeframes = [mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_M30, mt5.TIMEFRAME_H1]  # M1 deactivated - no need to preload its zones
     
     print("🔄 Preloading supply-demand zones for all timeframe combinations...")
     
