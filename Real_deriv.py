@@ -221,10 +221,11 @@ def plot_active_channels():
                     'sl1': ('red', ':', 'Secondary SL'),
                     'tp1': ('darkgreen', ':', 'Take Profit 1'),
                     'tp2': ('limegreen', ':', 'Take Profit 2'),
+                    'tp3': ('lime', ':', 'Take Profit 3'),
                     'sniper': ('purple', ':', 'Sniper Entry')
                 }
 
-                for level in ['sl', 'sl1', 'tp1', 'tp2', 'sniper']:
+                for level in ['sl', 'sl1', 'tp1', 'tp2', 'tp3', 'sniper']:
                     if level in fib_levels:
                         color, linestyle, label = fib_colors[level]
                         level_line = pd.Series(fib_levels[level], index=df_plot.index)
@@ -270,7 +271,7 @@ def plot_active_channels():
 
                 if (symbol, timeframe) in levels:
                     fib_text = "Fibonacci Levels:\n"
-                    for level in ['sniper', 'sl', 'sl1', 'tp1', 'tp2']:
+                    for level in ['sniper', 'sl', 'sl1', 'tp1', 'tp2', 'tp3']:
                         if level in levels[(symbol,timeframe)]:
                             fib_text += f"{level.upper()}: {levels[(symbol,timeframe)][level]:.5f}\n"
 
@@ -768,24 +769,42 @@ def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
     
     if is_buy:
         levels[(symbol,timeframe)] = {
-            "sl": swing_point - (0.9 * risk), 
-            "tp1": swing_point + (2.8 * risk),  
-            "tp2": entry_price + (3.5 * risk), 
+            "sl": swing_point - (0.9 * risk),
+            "tp1": swing_point + (1.8 * risk),
+            "tp2": swing_point + (2.8 * risk),
+            "tp3": entry_price + (3.5 * risk),
             "sniper": swing_point + (0.3 * risk), 
             "sl1": swing_point - (0.2 * risk),
             "direction": "BUY"   
         }
     else:
         levels[(symbol,timeframe)] = {
-            "sl": swing_point + (0.9 * risk),  
-            "tp1": swing_point - (2.8 * risk),   
-            "tp2": entry_price - (3.5 * risk), 
+            "sl": swing_point + (0.9 * risk),
+            "tp1": swing_point - (1.8 * risk),
+            "tp2": swing_point - (2.8 * risk),
+            "tp3": entry_price - (3.5 * risk),
             "sniper": swing_point - (0.3 * risk), 
             "sl1": swing_point   + (0.2 * risk),
             "direction": "SELL"
         }
     
     return levels[(symbol,timeframe)]
+
+def format_tp_comment(tp1, tp2):
+    """Encode tp1 and tp2 into the compact pipe-delimited order/position comment."""
+    return f"{tp1}|{tp2}"
+
+def extract_tp_levels_from_comment(comment):
+    """Decode the pipe-delimited comment back into (tp1, tp2). Returns (None, None) on failure."""
+    if not comment or pd.isna(comment) if hasattr(pd, "isna") else not comment:
+        return None, None
+    try:
+        parts = str(comment).split("|")
+        if len(parts) < 2:
+            return None, None
+        return float(parts[0]), float(parts[1])
+    except (ValueError, TypeError):
+        return None, None
     
 def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
     if abs(sl - sniper) >= abs(tp - sniper):
@@ -812,14 +831,14 @@ def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
             "tp": tp,
             "deviation": 10,
             "magic": timeframe,
-            "comment": f"{levels[(symbol,timeframe)]["tp1"]}",
+            "comment": format_tp_comment(levels[(symbol,timeframe)]["tp1"], levels[(symbol,timeframe)]["tp2"]),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_FOK,
         }
     order = mt5.order_send(request1)
     if order.retcode == mt5.TRADE_RETCODE_DONE:
         plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
-        send_telegram_image(plot_filename,f"📥 <b>Deriv Pending Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {sniper:.4f}\nSL: {sl:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {tp:.4f}")
+        send_telegram_image(plot_filename,f"📥 <b>Deriv Pending Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {sniper:.4f}\nSL: {sl:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {levels[(symbol,timeframe)]["tp2"]:.4f}\nTP3: {tp:.4f}")
         print(f"Pending Trade placed: {direction} {symbol} @ {sniper}")
     else:
         print(f"{symbol}, pending {direction}@{entry_price} sl:{sl},tp:{tp} failed: {order.comment}")
@@ -844,14 +863,14 @@ def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
         "tp": tp,
         "deviation": 10,
         "magic": timeframe,
-        "comment": f"{levels[(symbol,timeframe)]["tp1"]}",
+        "comment": format_tp_comment(levels[(symbol,timeframe)]["tp1"], levels[(symbol,timeframe)]["tp2"]),
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_FOK,
     }
     order = mt5.order_send(request)
     if order.retcode == mt5.TRADE_RETCODE_DONE:
         plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
-        send_telegram_image(plot_filename,f"🚀 <b>Deriv Market Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {entry_price:.4f}\nSL: {sl1:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {tp:.4f}")
+        send_telegram_image(plot_filename,f"🚀 <b>Deriv Market Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {entry_price:.4f}\nSL: {sl1:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {levels[(symbol,timeframe)]["tp2"]:.4f}\nTP3: {tp:.4f}")
         print(f"Trade placed: {direction} {symbol} @ {entry_price}")
     else:
         print(f"{symbol},{direction}@{entry_price} sl:{sl1},tp:{tp} failed: {order.comment}")
@@ -903,104 +922,117 @@ def close_pending(symbol):
         else:
             print(f"Order still valid for {symbol} ")
 
-def check_tp1_and_manage_trades(symbol, tp1,timeframe):
-    if isinstance(tp1,str):
-        if tp1=='':
+def _cut_lot(volume, symbol):
+    """Same fractional cut used by the engulfing-halving logic: closes ~1/3 of `volume`
+    (volume - volume/1.5), applied fresh to whatever the current volume is."""
+    return round(volume - (volume / 1.5), 2)
+
+def check_tp1_and_manage_trades(symbol, tp1, timeframe):
+    """Fires at (new) TP1: apply breakeven and close ~1/3 of the current position."""
+    if isinstance(tp1, str):
+        if tp1 == '':
             return
-        Tp1=float(tp1)
+        Tp1, _tp2_unused = extract_tp_levels_from_comment(tp1)
+        if Tp1 is None:
+            return
         positions = mt5.positions_get(symbol=symbol)
-        if positions is not None:
-            for position in positions:
-                entry_price = position.price_open
-                current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
-                
-                
-
-                # Original TP1 logic (half position & move SL to breakeven)
-                if (position.type == mt5.ORDER_TYPE_BUY and current_price >= Tp1) or \
-                (position.type == mt5.ORDER_TYPE_SELL and current_price <= Tp1):
-                    if position.volume == get_min_lot_size(symbol):
-                        modify_trade_to_breakeven(symbol, position.ticket, entry_price)
-                        continue
-                    if position.volume <= (get_min_lot_size(symbol) * 2 / 2):
-                        print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
-                        continue
-                    if position.sl == position.price_open:
-                        print(f"✅ Position {position.ticket} for {symbol} SL has already been modified")
-                    else:
-                        half_lot = round(position.volume / 2, 2)
-                        close_request = {
-                            "action": mt5.TRADE_ACTION_DEAL,
-                            "symbol": symbol,
-                            "volume": half_lot,
-                            "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
-                            "position": position.ticket,
-                            "price": current_price,
-                            "comment": position.comment,
-                            "deviation": 10,
-                            "magic": position.magic,
-                            "type_time": mt5.ORDER_TIME_GTC,
-                            "type_filling": mt5.ORDER_FILLING_FOK,
-                        }
-                        close_result = mt5.order_send(close_request)
-                        if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} trade.✅")
-                            print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
-                            modify_trade_to_breakeven(symbol, position.ticket, entry_price)
-                        elif close_result.comment == "Invalid volume":
-                            send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} trade.✅")
-                            print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
-                            modify_trade_to_breakeven(symbol, position.ticket, entry_price)
-                        else:
-                            print(f"❌ Failed to close half of  of {symbol}: {close_result.comment}")
-
     else:
-        positions = mt5.positions_get(symbol=symbol,magic=timeframe)
-        if positions is not None:
-            for position in positions:
-                entry_price = position.price_open
-                current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
-                magic =position.magic
-                
+        Tp1 = tp1
+        positions = mt5.positions_get(symbol=symbol, magic=timeframe)
 
-                # Original TP1 logic (half position & move SL to breakeven)
-                if timeframe == magic:
-                    if (position.type == mt5.ORDER_TYPE_BUY and current_price >= tp1 ) or \
-                    (position.type == mt5.ORDER_TYPE_SELL and current_price <= tp1 ):
-                        if position.volume == get_min_lot_size(symbol):
-                            modify_trade_to_breakeven(symbol, position.ticket, entry_price)
-                            continue
-                        if position.volume <= (get_min_lot_size(symbol) * 2 / 2):
-                            print(f"✅ Position {position.ticket} for {symbol} already halved at TP1.")
-                            continue
-                        if position.sl == position.price_open:
-                            print(f"✅ Position {position.ticket} for {symbol} SL has already been modified")
-                        else:
-                            half_lot = round(position.volume / 2, 2)
-                            close_request = {
-                                "action": mt5.TRADE_ACTION_DEAL,
-                                "symbol": symbol,
-                                "volume": half_lot,
-                                "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
-                                "position": position.ticket,
-                                "price": current_price,
-                                "comment": position.comment,
-                                "deviation": 10,
-                                "magic": magic,
-                                "type_time": mt5.ORDER_TIME_GTC,
-                                "type_filling": mt5.ORDER_FILLING_FOK,
-                            }
-                            close_result = mt5.order_send(close_request)
-                            if close_result.retcode == mt5.TRADE_RETCODE_DONE:
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} trade.✅")
-                                print(f"✅ Closed half of position {position.ticket} for {symbol} at TP1.")
-                                modify_trade_to_breakeven(symbol, position.ticket, entry_price)
-                            elif close_result.comment == "Invalid volume":
-                                send_telegram_message(f"TP1 hit. Apply breakeven and close half of deriv positions for {symbol} trade.✅")
-                                print(f"{symbol} cannot be halved, but SL has been moved to breakeven.")
-                                modify_trade_to_breakeven(symbol, position.ticket, entry_price)
-                            else:
-                                print(f"❌ Failed to close half of position: {close_result.comment}")
+    if positions is not None:
+        for position in positions:
+            if position.magic != timeframe:
+                continue
+            entry_price = position.price_open
+            current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
+
+            # TP1 logic: breakeven + close ~1/3 of current position
+            if (position.type == mt5.ORDER_TYPE_BUY and current_price >= Tp1) or \
+            (position.type == mt5.ORDER_TYPE_SELL and current_price <= Tp1):
+                if position.volume == get_min_lot_size(symbol):
+                    modify_trade_to_breakeven(symbol, position.ticket, entry_price)
+                    continue
+                if position.sl == position.price_open:
+                    print(f"✅ Position {position.ticket} for {symbol} already processed at TP1 (breakeven already applied).")
+                    continue
+                cut_lot = _cut_lot(position.volume, symbol)
+                close_request = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": symbol,
+                    "volume": cut_lot,
+                    "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+                    "position": position.ticket,
+                    "price": current_price,
+                    "comment": position.comment,
+                    "deviation": 10,
+                    "magic": position.magic,
+                    "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_FOK,
+                }
+                close_result = mt5.order_send(close_request)
+                if close_result.retcode == mt5.TRADE_RETCODE_DONE:
+                    send_telegram_message(f"TP1 hit. Apply breakeven and close ~1/3 of deriv positions for {symbol} trade.✅")
+                    print(f"✅ Closed ~1/3 of position {position.ticket} for {symbol} at TP1.")
+                    modify_trade_to_breakeven(symbol, position.ticket, entry_price)
+                elif close_result.comment == "Invalid volume":
+                    send_telegram_message(f"TP1 hit. Apply breakeven for deriv {symbol} trade (volume too small to cut).✅")
+                    print(f"{symbol} cannot be cut, but SL has been moved to breakeven.")
+                    modify_trade_to_breakeven(symbol, position.ticket, entry_price)
+                else:
+                    print(f"❌ Failed to close portion of {symbol}: {close_result.comment}")
+
+def check_tp2_and_manage_trades(symbol, tp2, timeframe):
+    """Fires at TP2 (the old TP1): close ~1/3 of whatever volume currently remains.
+    Breakeven should already be applied from TP1, but this checks defensively rather
+    than assuming it, to handle the edge case where TP1 was skipped/slipped past."""
+    if isinstance(tp2, str):
+        if tp2 == '':
+            return
+        _tp1_unused, Tp2 = extract_tp_levels_from_comment(tp2)
+        if Tp2 is None:
+            return
+        positions = mt5.positions_get(symbol=symbol)
+    else:
+        Tp2 = tp2
+        positions = mt5.positions_get(symbol=symbol, magic=timeframe)
+
+    if positions is not None:
+        for position in positions:
+            if position.magic != timeframe:
+                continue
+            entry_price = position.price_open
+            current_price = mt5.symbol_info_tick(symbol).bid if position.type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
+
+            if (position.type == mt5.ORDER_TYPE_BUY and current_price >= Tp2) or \
+            (position.type == mt5.ORDER_TYPE_SELL and current_price <= Tp2):
+                # Defensive breakeven check - normally already applied at TP1, but don't assume it
+                if position.sl != position.price_open:
+                    modify_trade_to_breakeven(symbol, position.ticket, entry_price)
+                if position.volume == get_min_lot_size(symbol):
+                    continue
+                cut_lot = _cut_lot(position.volume, symbol)
+                close_request = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": symbol,
+                    "volume": cut_lot,
+                    "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+                    "position": position.ticket,
+                    "price": current_price,
+                    "comment": position.comment,
+                    "deviation": 10,
+                    "magic": position.magic,
+                    "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_FOK,
+                }
+                close_result = mt5.order_send(close_request)
+                if close_result.retcode == mt5.TRADE_RETCODE_DONE:
+                    send_telegram_message(f"TP2 hit. Closed further portion of deriv position for {symbol} trade.✅")
+                    print(f"✅ Closed further portion of position {position.ticket} for {symbol} at TP2.")
+                elif close_result.comment == "Invalid volume":
+                    print(f"{symbol} cannot be cut further at TP2 (volume too small).")
+                else:
+                    print(f"❌ Failed to close portion of {symbol} at TP2: {close_result.comment}")
  
 def del_completed():
     if levels:
@@ -1024,16 +1056,16 @@ def del_completed():
                 print(f"🚨 {symbol} hit SL - channel removed.")
                 continue  # Skip TP check since we already hit SL
 
-            # Check TP2
-            if (direction == "BUY" and current_price >= L["tp2"]) or (direction == "SELL" and current_price <= L["tp2"]):
-                # Hit TP2 - delete channel and levels
+            # Check TP3 (final target)
+            if (direction == "BUY" and current_price >= L["tp3"]) or (direction == "SELL" and current_price <= L["tp3"]):
+                # Hit TP3 - delete channel and levels
                 if (symbol, timeframe) in active_channels:
                     plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
-                    send_telegram_image(plot_filename, f"✅ {symbol} hit Deriv TP2 on {timeframe_to_str(timeframe)}")
+                    send_telegram_image(plot_filename, f"✅ {symbol} hit Deriv TP3 on {timeframe_to_str(timeframe)}")
                     del active_channels[(symbol,timeframe)]
                 if (symbol, timeframe) in levels:
                     del levels[(symbol,timeframe)]
-                print(f"✅ {symbol} hit TP2 - channel removed.")  
+                print(f"✅ {symbol} hit TP3 - channel removed.")  
         
             
 
@@ -1121,17 +1153,19 @@ while True:
                             if fib_levels:
                                     direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
                                     if symbol in H1_pen :
-                                        pending(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl'], fib_levels['tp2'],fib_levels['sniper'],timeframe)
+                                        pending(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl'], fib_levels['tp3'],fib_levels['sniper'],timeframe)
                                     elif symbol in H1_pl:
-                                        place_trade(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl1'], fib_levels['tp2'],timeframe)
+                                        place_trade(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl1'], fib_levels['tp3'],timeframe)
                 if (symbol, timeframe) in levels :
                     L =levels[(symbol,timeframe)]
                     check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
+                    check_tp2_and_manage_trades(symbol, L["tp2"], timeframe)
                 else:
                     positions = mt5.positions_get(symbol=symbol)
                     if positions is not None:
                         for position in positions:
                             check_tp1_and_manage_trades(symbol, position.comment, timeframe)
+                            check_tp2_and_manage_trades(symbol, position.comment, timeframe)
                 close_pending(symbol)
  
         for symbol in TIMEFRAME_M15 :
@@ -1201,17 +1235,19 @@ while True:
                             if fib_levels:
                                     direction = "BUY" if candles['close'].iloc[entry_idx] > candles['upper'].iloc[entry_idx] else "SELL"
                                     if symbol in M15_pen :
-                                        pending(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl'], fib_levels['tp2'],fib_levels['sniper'],timeframe)
+                                        pending(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl'], fib_levels['tp3'],fib_levels['sniper'],timeframe)
                                     elif symbol in M15_pl:
-                                        place_trade(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl1'], fib_levels['tp2'],timeframe)
+                                        place_trade(symbol, direction, candles['close'].iloc[entry_idx], fib_levels['sl1'], fib_levels['tp3'],timeframe)
                 if (symbol, timeframe) in levels :
                     L =levels[(symbol,timeframe)]
                     check_tp1_and_manage_trades(symbol, L["tp1"], timeframe)
+                    check_tp2_and_manage_trades(symbol, L["tp2"], timeframe)
                 else:
                     positions = mt5.positions_get(symbol=symbol)
                     if positions is not None:
                         for position in positions:
                             check_tp1_and_manage_trades(symbol, position.comment,timeframe)
+                            check_tp2_and_manage_trades(symbol, position.comment,timeframe)
                 close_pending(symbol)
 
         for (symbol,timeframe) in active_channels:
@@ -1226,4 +1262,4 @@ while True:
         send_telegram_message("Deriv Bot stopped")
         print(f"⚠️ Unexpected error: {e}")
         clear_plots_folder()
-        raise 
+        raise

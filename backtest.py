@@ -902,8 +902,9 @@ def apply_fibonacci_levels(symbol, entry_idx, df, timeframe, state):
     if is_buy:
         fib_levels = {
             "sl": swing_point - (0.9 * risk),
-            "tp1": swing_point + (2.8 * risk),
-            "tp2": entry_price + (3.5 * risk),
+            "tp1": swing_point + (1.8 * risk),
+            "tp2": swing_point + (2.8 * risk),
+            "tp3": entry_price + (3.5 * risk),
             "sniper": swing_point + (0.3 * risk),
             "sl1": swing_point - (0.2 * risk),
             "direction": "BUY",
@@ -915,8 +916,9 @@ def apply_fibonacci_levels(symbol, entry_idx, df, timeframe, state):
     else:
         fib_levels = {
             "sl": swing_point + (0.9 * risk),
-            "tp1": swing_point - (2.8 * risk),
-            "tp2": entry_price - (3.5 * risk),
+            "tp1": swing_point - (1.8 * risk),
+            "tp2": swing_point - (2.8 * risk),
+            "tp3": entry_price - (3.5 * risk),
             "sniper": swing_point - (0.3 * risk),
             "sl1": swing_point + (0.2 * risk),
             "direction": "SELL",
@@ -1133,7 +1135,8 @@ def pending(symbol, direction, entry_price, sl, tp, sniper, timeframe, state, ca
         'entry_price': sniper,
         'sl': sl,
         'tp1': state.levels[key]["tp1"] if key in state.levels else None,
-        'tp2': tp,
+        'tp2': state.levels[key]["tp2"] if key in state.levels else None,
+        'tp3': tp,
         'sniper': sniper,
         'size': pos_size,
         'entry_time': candle_time,
@@ -1179,7 +1182,8 @@ def place_trade(symbol, direction, entry_price, sl1, tp, timeframe, state, candl
         'entry_price': entry_price,
         'sl': sl1,
         'tp1': state.levels[key]["tp1"] if key in state.levels else None,
-        'tp2': tp,
+        'tp2': state.levels[key]["tp2"] if key in state.levels else None,
+        'tp3': tp,
         'size': pos_size,
         'entry_time': candle_time,
         'status': 'open',
@@ -1211,7 +1215,7 @@ def modify_trade_to_breakeven(symbol, order_ticket, entry_price, state, current_
 
 def close_pending(symbol, state, current_time, all_data):
     """
-    Check and close pending orders if TP1 is hit - EXACTLY as in visuals.py close_pending()
+    Check and close pending orders if TP2 (the old TP1) is hit - EXACTLY as in visuals.py close_pending()
     """
     key = None
     for k in list(state.levels.keys()):
@@ -1228,7 +1232,7 @@ def close_pending(symbol, state, current_time, all_data):
         return
     
     L = state.levels[key]
-    tp1 = L["tp1"]
+    tp2 = L["tp2"]
     direction = L["direction"]
     entry_time = L["entry_time"]
     
@@ -1239,31 +1243,31 @@ def close_pending(symbol, state, current_time, all_data):
     if len(df_after) == 0:
         return
     
-    crossed_tp1 = False
-    tp1_hit_time = None
+    crossed_tp2 = False
+    tp2_hit_time = None
     if direction == "BUY":
-        tp1_hits = df_after[df_after['high'] >= tp1]
-        if len(tp1_hits) > 0:
-            crossed_tp1 = True
-            tp1_hit_time = tp1_hits.iloc[0]['time']
+        tp2_hits = df_after[df_after['high'] >= tp2]
+        if len(tp2_hits) > 0:
+            crossed_tp2 = True
+            tp2_hit_time = tp2_hits.iloc[0]['time']
     elif direction == "SELL":
-        tp1_hits = df_after[df_after['low'] <= tp1]
-        if len(tp1_hits) > 0:
-            crossed_tp1 = True
-            tp1_hit_time = tp1_hits.iloc[0]['time']
+        tp2_hits = df_after[df_after['low'] <= tp2]
+        if len(tp2_hits) > 0:
+            crossed_tp2 = True
+            tp2_hit_time = tp2_hits.iloc[0]['time']
     
-    if crossed_tp1:
+    if crossed_tp2:
         # Find the pending order
         for trade in state.trade_history:
             if trade['symbol'] == symbol and trade['timeframe'] == timeframe and trade['status'] == 'pending':
                 trade['status'] = 'cancelled'
-                trade['exit_time'] = tp1_hit_time
-                trade['exit_reason'] = 'TP1_hit_before_entry'
+                trade['exit_time'] = tp2_hit_time
+                trade['exit_reason'] = 'TP2_hit_before_entry'
                 
                 # Track as missed trade
                 missed_trade = trade.copy()
-                missed_trade['tp1_hit_time'] = tp1_hit_time
-                missed_trade['tp1_price'] = tp1
+                missed_trade['tp2_hit_time'] = tp2_hit_time
+                missed_trade['tp2_price'] = tp2
                 state.missed_trades.append(missed_trade)
                 state.missed_trades_count += 1
                 
@@ -1276,7 +1280,9 @@ def close_pending(symbol, state, current_time, all_data):
 
 def check_tp1_and_manage_trades(symbol, tp1_value, timeframe, state, current_time, all_data):
     """
-    Check if TP1 is hit and manage position - EXACTLY as in visuals.py check_tp1_and_manage_trades()
+    Check if TP1 (new, 1.8x risk) is hit and manage position - EXACTLY as in visuals.py
+    check_tp1_and_manage_trades() (simplified for backtest: flags the event and applies
+    breakeven rather than simulating the actual ~1/3 partial close).
     """
     if tp1_value is None:
         return
@@ -1317,14 +1323,61 @@ def check_tp1_and_manage_trades(symbol, tp1_value, timeframe, state, current_tim
                 # Apply breakeven
                 modify_trade_to_breakeven(symbol, trade['ticket'], entry_price, state, current_time)
                 
-                # Half position logic (simplified for backtest)
+                # Cut-to-~2/3 logic (simplified for backtest: just flags the event)
                 if 'tp1_hit' not in trade:
                     trade['tp1_hit'] = True
                     trade['tp1_hit_time'] = current_time
 
+def check_tp2_and_manage_trades(symbol, tp2_value, timeframe, state, current_time, all_data):
+    """
+    Check if TP2 (the old TP1, 2.8x risk) is hit and manage position - simplified
+    backtest companion to check_tp1_and_manage_trades(). Breakeven should already be
+    applied from TP1; this checks defensively rather than assuming it.
+    """
+    if tp2_value is None:
+        return
+    
+    if isinstance(tp2_value, str):
+        if tp2_value == '':
+            return
+        try:
+            Tp2 = float(tp2_value)
+        except:
+            return
+    else:
+        Tp2 = tp2_value
+    
+    for trade in state.trade_history:
+        if trade['symbol'] == symbol and trade['timeframe'] == timeframe and trade['status'] == 'open':
+            entry_price = trade['entry_price']
+            direction = trade['direction']
+            entry_time = trade['entry_time']
+            
+            df = all_data[symbol][timeframe]
+            df_after = df[df['time'] > entry_time]
+            
+            if len(df_after) == 0:
+                continue
+            
+            crossed_tp2 = False
+            if direction == "BUY":
+                if (df_after['high'] >= Tp2).any():
+                    crossed_tp2 = True
+            elif direction == "SELL":
+                if (df_after['low'] <= Tp2).any():
+                    crossed_tp2 = True
+            
+            if crossed_tp2:
+                # Defensive breakeven check - normally already applied at TP1
+                modify_trade_to_breakeven(symbol, trade['ticket'], entry_price, state, current_time)
+                
+                if 'tp2_hit' not in trade:
+                    trade['tp2_hit'] = True
+                    trade['tp2_hit_time'] = current_time
+
 def del_completed(state, current_time, all_data):
     """
-    Check for trades hitting SL or TP2 - EXACTLY as in visuals.py del_completed()
+    Check for trades hitting SL or TP3 - EXACTLY as in visuals.py del_completed()
     """
     for key in list(state.levels.keys()):
         symbol, timeframe = key
@@ -1333,7 +1386,7 @@ def del_completed(state, current_time, all_data):
         entry_time = L["entry_time"]
         sl = L["sl"]
         sl1 = L["sl1"]
-        tp2 = L["tp2"]
+        tp3 = L["tp3"]
         
         if not direction:
             continue
@@ -1345,16 +1398,16 @@ def del_completed(state, current_time, all_data):
         if len(df_after) == 0:
             continue
         
-        crossed_tp2 = False
+        crossed_tp3 = False
         crossed_sl1 = False
         crossed_sl = False
         
         if direction == "BUY":
-            crossed_tp2 = (df_after['high'] >= tp2).any()
+            crossed_tp3 = (df_after['high'] >= tp3).any()
             crossed_sl1 = (df_after['low'] <= sl1).any()
             crossed_sl = (df_after['low'] <= sl).any()
         elif direction == "SELL":
-            crossed_tp2 = (df_after['low'] <= tp2).any()
+            crossed_tp3 = (df_after['low'] <= tp3).any()
             crossed_sl1 = (df_after['high'] >= sl1).any()
             crossed_sl = (df_after['high'] >= sl).any()
         
@@ -1612,18 +1665,18 @@ def del_completed(state, current_time, all_data):
                         start_cooldown(symbol, timeframe, state, current_time)
                         continue
         
-        # Check TP2
-        if (direction == "BUY" and crossed_tp2) or (direction == "SELL" and crossed_tp2):
-            # Hit TP2
+        # Check TP3 (final target)
+        if (direction == "BUY" and crossed_tp3) or (direction == "SELL" and crossed_tp3):
+            # Hit TP3
             exit_idx = None
             if direction == "BUY":
-                tp2_hits = df_after[df_after['high'] >= tp2].index
-                if len(tp2_hits) > 0:
-                    exit_idx = tp2_hits[0]
+                tp3_hits = df_after[df_after['high'] >= tp3].index
+                if len(tp3_hits) > 0:
+                    exit_idx = tp3_hits[0]
             else:
-                tp2_hits = df_after[df_after['low'] <= tp2].index
-                if len(tp2_hits) > 0:
-                    exit_idx = tp2_hits[0]
+                tp3_hits = df_after[df_after['low'] <= tp3].index
+                if len(tp3_hits) > 0:
+                    exit_idx = tp3_hits[0]
             
             if exit_idx is not None:
                 exit_price = df_after.iloc[exit_idx]['close']
@@ -1637,7 +1690,7 @@ def del_completed(state, current_time, all_data):
                 trade['exit_price'] = exit_price
                 trade['pnl'] = pnl
                 trade['pnl_pct'] = pnl_pct
-                trade['exit_reason'] = 'TP2'
+                trade['exit_reason'] = 'TP3'
                 
                 state.current_capital += pnl
                 state.equity_curve.append({'time': exit_time, 'equity': state.current_capital})
@@ -2081,39 +2134,40 @@ def run_backtest(historical_data, symbols, timeframes, start_date=None, end_date
                             if timeframe == mt5.TIMEFRAME_H1:
                                 if symbol in H1_pen:
                                     pending(symbol, direction, candles['close'].iloc[entry_idx], 
-                                           fib_levels['sl'], fib_levels['tp2'], fib_levels['sniper'], 
+                                           fib_levels['sl'], fib_levels['tp3'], fib_levels['sniper'], 
                                            timeframe, state, current_time)
                                 elif symbol in H1_pl:
                                     place_trade(symbol, direction, candles['close'].iloc[entry_idx], 
-                                               fib_levels['sl1'], fib_levels['tp2'], 
+                                               fib_levels['sl1'], fib_levels['tp3'], 
                                                timeframe, state, current_time)
                             
                             elif timeframe == mt5.TIMEFRAME_M15:
                                 if symbol in M15_pen:
                                     pending(symbol, direction, candles['close'].iloc[entry_idx], 
-                                           fib_levels['sl'], fib_levels['tp2'], fib_levels['sniper'], 
+                                           fib_levels['sl'], fib_levels['tp3'], fib_levels['sniper'], 
                                            timeframe, state, current_time)
                                 elif symbol in M15_pl:
                                     place_trade(symbol, direction, candles['close'].iloc[entry_idx], 
-                                               fib_levels['sl1'], fib_levels['tp2'], 
+                                               fib_levels['sl1'], fib_levels['tp3'], 
                                                timeframe, state, current_time)
                             
                             elif timeframe == mt5.TIMEFRAME_M5:
                                 if symbol in M5_pen:
                                     pending(symbol, direction, candles['close'].iloc[entry_idx], 
-                                           fib_levels['sl'], fib_levels['tp2'], fib_levels['sniper'], 
+                                           fib_levels['sl'], fib_levels['tp3'], fib_levels['sniper'], 
                                            timeframe, state, current_time)
                                 elif symbol in M5_pl:
                                     place_trade(symbol, direction, candles['close'].iloc[entry_idx], 
-                                               fib_levels['sl1'], fib_levels['tp2'], 
+                                               fib_levels['sl1'], fib_levels['tp3'], 
                                                timeframe, state, current_time)
                 
-                # Check TP1 for existing levels
+                # Check TP1/TP2 for existing levels
                 if key in state.levels:
                     L = state.levels[key]
                     check_tp1_and_manage_trades(symbol, L.get("tp1"), timeframe, state, current_time, historical_data)
+                    check_tp2_and_manage_trades(symbol, L.get("tp2"), timeframe, state, current_time, historical_data)
                 
-                # Close pending orders if TP1 hit
+                # Close pending orders if TP2 (old TP1) hit
                 close_pending(symbol, state, current_time, historical_data)
         
         # Global management functions (run at each timestamp exactly as in live bot)
@@ -2211,10 +2265,10 @@ def analyze_results(state):
     # Recent missed trades
     if state.missed_trades:
         print("\n" + "-"*30)
-        print("LAST 5 MISSED TRADES (TP1 hit before entry):")
+        print("LAST 5 MISSED TRADES (TP2 hit before entry):")
         recent_missed = sorted(state.missed_trades, key=lambda x: x['exit_time'])[-5:]
         for t in recent_missed:
-            print(f"{t['exit_time']} | {t['symbol']} {t['direction']} | TP1: {t['tp1']:.4f} | Entry would have been: {t['entry_price']:.4f}")
+            print(f"{t['exit_time']} | {t['symbol']} {t['direction']} | TP2: {t['tp2_price']:.4f} | Entry would have been: {t['entry_price']:.4f}")
     
     return {
         'total_signals': state.total_signals,

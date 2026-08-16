@@ -94,7 +94,7 @@ def get_trading_config():
     }
 
 def get_all_deals():
-    from_date = datetime(2026, 7, 11)
+    from_date = datetime(2026, 8, 16)
     to_date = datetime.now()
     deals = mt5.history_deals_get(from_date, to_date)
     print(f"Looking for deals from {from_date.date()} to {to_date.date()}")
@@ -113,7 +113,7 @@ def get_all_deals():
     return df
 
 def get_all_orders():
-    from_date = datetime(2026, 7, 11)
+    from_date = datetime(2026, 8, 16)
     to_date = datetime.now()
     orders = mt5.history_orders_get(from_date, to_date)
     if orders is None or len(orders) == 0:
@@ -126,8 +126,23 @@ def get_all_orders():
         df['time_done'] = pd.to_datetime(df['time_done'], unit='s')
     return df
 
-def extract_tp1_from_comment(comment: str):
-    """Extract TP1 from comment field"""
+def extract_tp_levels_from_comment(comment):
+    """Decode the pipe-delimited 'tp1|tp2' comment written by the live bot into (tp1, tp2).
+    Used for OUR OWN order/entry-deal comments, which always carry this format."""
+    if not comment or pd.isna(comment):
+        return None, None
+    try:
+        parts = str(comment).split("|")
+        if len(parts) < 2:
+            return None, None
+        return float(parts[0]), float(parts[1])
+    except (ValueError, TypeError):
+        return None, None
+
+def extract_first_float_from_comment(comment):
+    """Generic fallback: pulls the first float-looking substring from a comment field,
+    regardless of format. Used for broker-generated exit-deal comments, which may not
+    carry our own tp1|tp2 format (e.g. this is how `last_sl` is recovered below)."""
     if not comment or pd.isna(comment):
         return None
     try:
@@ -190,11 +205,14 @@ def get_ticks_for_simulation(symbol, start_time, end_time, max_ticks=1000000):
         print(f"⚠️ Error getting ticks for {symbol}: {e}")
         return pd.DataFrame()
 
-def simulate_price_hits_with_ticks(symbol, direction, entry_price, tp1_price, sl_price, start_time, end_time):
+def simulate_price_hits_with_ticks(symbol, direction, entry_price, target_price, sl_price, start_time, end_time):
     """
-    Simulate price hits using tick-by-tick data for maximum accuracy
+    Simulate price hits using tick-by-tick data for maximum accuracy.
+    `target_price` is whichever level the caller wants to check hits against (for the
+    pending-order "missed opportunity" analysis this is TP2 - the old TP1 - since that's
+    the level close_pending() actually watches in the live bot).
     
-    Returns: tuple of (tp1_hit, sl_hit, entry_hit, tp1_time, sl_time, entry_time, first_touch_time)
+    Returns: tuple of (target_hit, sl_hit, entry_hit, target_time, sl_time, entry_time, first_touch_time)
     """
     # Get tick data
     ticks_df = get_ticks_for_simulation(symbol, start_time, end_time)
@@ -204,8 +222,8 @@ def simulate_price_hits_with_ticks(symbol, direction, entry_price, tp1_price, sl
         return False, False, False, None, None, None, None
     
     # Initialize tracking variables
-    tp1_hit = sl_hit = entry_hit = False
-    tp1_time = sl_time = entry_time = first_touch_time = None
+    target_hit = sl_hit = entry_hit = False
+    target_time = sl_time = entry_time = first_touch_time = None
     
     # For buy orders, we use ask price for entry check and bid price for TP/SL check
     # For sell orders, we use bid price for entry check and ask price for TP/SL check
@@ -223,14 +241,14 @@ def simulate_price_hits_with_ticks(symbol, direction, entry_price, tp1_price, sl
                 continue
             bid = ask = last_price
         
-        # Check TP1 hit
-        if not tp1_hit:
-            if direction == "BUY" and bid >= tp1_price:
-                tp1_hit = True
-                tp1_time = tick_time
-            elif direction == "SELL" and ask <= tp1_price:
-                tp1_hit = True
-                tp1_time = tick_time
+        # Check target hit
+        if not target_hit:
+            if direction == "BUY" and bid >= target_price:
+                target_hit = True
+                target_time = tick_time
+            elif direction == "SELL" and ask <= target_price:
+                target_hit = True
+                target_time = tick_time
         
         # Check SL hit
         if not sl_hit and sl_price > 0:
@@ -254,20 +272,20 @@ def simulate_price_hits_with_ticks(symbol, direction, entry_price, tp1_price, sl
         if not first_touch_time:
             touched = False
             if direction == "BUY":
-                if bid >= tp1_price or ask <= sl_price or ask <= entry_price:
+                if bid >= target_price or ask <= sl_price or ask <= entry_price:
                     touched = True
             elif direction == "SELL":
-                if ask <= tp1_price or bid >= sl_price or bid >= entry_price:
+                if ask <= target_price or bid >= sl_price or bid >= entry_price:
                     touched = True
             
             if touched:
                 first_touch_time = tick_time
         
         # Early exit if all levels hit
-        if tp1_hit and sl_hit and entry_hit:
+        if target_hit and sl_hit and entry_hit:
             break
     
-    return tp1_hit, sl_hit, entry_hit, tp1_time, sl_time, entry_time, first_touch_time
+    return target_hit, sl_hit, entry_hit, target_time, sl_time, entry_time, first_touch_time
 
 def analyze_pending_orders_enhanced():
     """Enhanced pending order analysis with TICK-BASED simulations"""
@@ -297,11 +315,13 @@ def analyze_pending_orders_enhanced():
         # Safe conversion
         entry = safe_float_conversion(order['price_open'])
         sl = safe_float_conversion(order['sl'])
-        tp2 = safe_float_conversion(order['tp'])
+        tp3 = safe_float_conversion(order['tp'])  # broker-side final target
         comment = str(order.get('comment', ''))
-        tp1 = extract_tp1_from_comment(comment)
+        tp1, tp2 = extract_tp_levels_from_comment(comment)
 
-        if tp1 is None or sl == 0.0 or entry == 0.0:
+        # TP2 (the old TP1) is what close_pending() in the live bot actually watches to
+        # cancel a resting order, so it's the level this simulation checks against.
+        if tp2 is None or sl == 0.0 or entry == 0.0:
             processed_count += 1
             continue
 
@@ -324,19 +344,19 @@ def analyze_pending_orders_enhanced():
             # Still pending, analyze up to current time
             end = datetime.now()
         
-        # Use tick-based simulation
-        tp1_hit, sl_hit, entry_hit, tp1_time, sl_time, entry_time, first_touch_time = \
-            simulate_price_hits_with_ticks(symbol, direction, entry, tp1, sl, start, end)
+        # Use tick-based simulation, checking hits against TP2 (the missed-opportunity trigger)
+        target_hit, sl_hit, entry_hit, target_time, sl_time, entry_time, first_touch_time = \
+            simulate_price_hits_with_ticks(symbol, direction, entry, tp2, sl, start, end)
         
         # Enhanced outcome determination
-        missed_opportunity = tp1_hit and not entry_hit
+        missed_opportunity = target_hit and not entry_hit
         won_trade = False
         lost_trade = False
         
         if entry_hit:
-            if tp1_hit and (not sl_hit or (sl_time and tp1_time and tp1_time < sl_time)):
+            if target_hit and (not sl_hit or (sl_time and target_time and target_time < sl_time)):
                 won_trade = True
-            elif sl_hit and (not tp1_hit or (tp1_time and sl_time and sl_time < tp1_time)):
+            elif sl_hit and (not target_hit or (target_time and sl_time and sl_time < target_time)):
                 lost_trade = True
 
         # Determine order type from config
@@ -359,13 +379,14 @@ def analyze_pending_orders_enhanced():
             "TP1": tp1,
             "SL": sl,
             "TP2": tp2,
-            "TP1 Hit": tp1_hit,
+            "TP3": tp3,
+            "TP2 Hit": target_hit,
             "SL Hit": sl_hit,
             "Entry Filled": entry_hit,
             "Missed Opportunity": missed_opportunity,
             "Won Trade": won_trade,
             "Lost Trade": lost_trade,
-            "TP1 Time": tp1_time,
+            "TP2 Time": target_time,
             "SL Time": sl_time,
             "Entry Time": entry_time,
             "First Touch Time": first_touch_time,
@@ -436,10 +457,10 @@ def analyze_completed_trades():
             placement_time = entry_time
         
         sl = safe_float_conversion(entry.get('sl', 0))
-        tp = safe_float_conversion(entry.get('tp', 0))
+        tp3 = safe_float_conversion(entry.get('tp', 0))  # broker-side final target
         
         comment = str(entry.get('comment', '')).strip()
-        tp1 = extract_tp1_from_comment(comment)
+        tp1, tp2 = extract_tp_levels_from_comment(comment)
         
         net_profit = group['profit'].sum() + group['swap'].sum() + group['commission'].sum()
         net_profit = round(float(net_profit), 2)
@@ -448,7 +469,9 @@ def analyze_completed_trades():
         if exit_deals.empty:
             continue
         exit = exit_deals.iloc[-1]
-        last_sl = extract_tp1_from_comment(exit.get('comment', 0))
+        # Exit-deal comment may be broker-generated text rather than our own tp1|tp2
+        # format, so this uses the generic first-float extractor, not the strict pair parser.
+        last_sl = extract_first_float_from_comment(exit.get('comment', 0))
         
         # Outcome & Reason
         if net_profit > 0:
@@ -489,8 +512,9 @@ def analyze_completed_trades():
             "Trade Type": "COMPLETED",
             "Entry Price": entry_price,
             "SL": sl if sl != 0 else None,
-            "TP": tp if tp != 0 else None,
+            "TP3": tp3 if tp3 != 0 else None,
             "TP1": tp1,
+            "TP2": tp2,
             "Volume": volume,
             "Position ID": pos_id,
             "Simulation Method": "ACTUAL"  # Track that this is actual trade, not simulation
@@ -511,7 +535,7 @@ def analyze_strategy_performance():
     df_completed = pd.DataFrame(completed_data)
     
     # Add missing columns with correct type so they survive the concat
-    for col in ['Outcome', 'Reason', 'TP', 'Volume', 'Position ID', 'Profit']:
+    for col in ['Outcome', 'Reason', 'Volume', 'Position ID', 'Profit']:
         if col not in df_pending.columns:
             df_pending[col] = pd.NA
         if col not in df_completed.columns:
@@ -521,18 +545,432 @@ def analyze_strategy_performance():
     df = pd.concat([df_pending, df_completed], ignore_index=True)
     
     # Type fixing
-    numeric_columns = ['Entry Price', 'TP1', 'SL', 'TP2', 'Profit', 'Volume', 'TP']
+    numeric_columns = ['Entry Price', 'TP1', 'SL', 'TP2', 'TP3', 'Profit', 'Volume']
     for col in numeric_columns:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    bool_columns = ['TP1 Hit', 'SL Hit', 'Entry Filled', 'Missed Opportunity', 'Won Trade']
+    bool_columns = ['TP2 Hit', 'SL Hit', 'Entry Filled', 'Missed Opportunity', 'Won Trade']
     for col in bool_columns:
         if col in df.columns:
             df[col] = df[col].astype('boolean')
     
     print(f"Final combined dataset: {len(df)} rows ({len(df_pending)} pending + {len(df_completed)} completed)")
     return df
+# ======================================================================================
+# === SHADOW-MODE ENGULF ANALYSIS (pending-order alternate-entry edge) ===
+# Retroactively simulates: instead of a resting pending order filling at `sniper`, wait
+# for price to touch sniper, then require a raw body-engulf candle (opposite color, body
+# fully containing the prior candle's body, in the trade's direction — no 3-prior-candle
+# filter, no confirmation candle, unlike the bot's own detect_opposite_engulfing()) on the
+# confirmation timeframe before entering. The valid-entry zone is symmetric around sniper:
+# sniper +/- 20% of the original entry->SL risk. If price closes beyond the SL-side
+# boundary before a qualifying engulf appears, the setup is abandoned (dodged a loss). If
+# price closes beyond the TP-side boundary first, the setup also gets no entry, but for the
+# opposite reason -- the move ran favorably without ever giving the pullback/engulf entry
+# (a missed win, not a dodge). Confirmation timeframe is M3 first; if no qualifying engulf
+# is found anywhere in the valid window on M3, M5 is scanned over that same window as a
+# fallback (an M5 candle can show a clean engulf that's noisy/split across M3 candles).
+# Entry price/time = the engulfing candle's own close, since this is closed historical data
+# (no need to wait an extra candle for confirmation the way live data would require).
+# ======================================================================================
+
+SHADOW_ENGULF_TIMEFRAME_PRIMARY = mt5.TIMEFRAME_M1    # Real_exness.py only trades M1
+SHADOW_ENGULF_TIMEFRAME_FALLBACK = mt5.TIMEFRAME_M1   # same as primary here -- no separate fallback timeframe for M1-only Real_exness.py
+SHADOW_ZONE_RISK_FRACTION = 0.20                      # symmetric zone: sniper +/- 20% of risk
+
+def detect_raw_body_engulf(df, direction, i):
+    """
+    True if candle i is a raw body-engulf of candle i-1 in the trade direction: opposite
+    color from the prior candle, and its body (open/close) fully contains the prior
+    candle's body. No other conditions -- deliberately simpler than the live bot's own
+    detect_opposite_engulfing(), which is a different, more filtered pattern.
+    """
+    if i < 1 or i >= len(df):
+        return False
+    prev_open, prev_close = df['open'].iloc[i-1], df['close'].iloc[i-1]
+    cur_open, cur_close = df['open'].iloc[i], df['close'].iloc[i]
+    prev_bullish = prev_close > prev_open
+    cur_bullish = cur_close > cur_open
+
+    if direction == "BUY":
+        if not (cur_bullish and not prev_bullish):
+            return False
+        return cur_open <= prev_close and cur_close >= prev_open
+    elif direction == "SELL":
+        if not (not cur_bullish and prev_bullish):
+            return False
+        return cur_open >= prev_close and cur_close <= prev_open
+    return False
+
+
+def fetch_shadow_confirmation_candles(symbol, start_time, end_time, timeframe):
+    """Fetch confirmation-timeframe candles from start_time to end_time for the shadow logic."""
+    if pd.isna(start_time) or pd.isna(end_time) or end_time <= start_time:
+        return pd.DataFrame()
+    try:
+        rates = mt5.copy_rates_range(symbol, timeframe, start_time, end_time)
+    except Exception as e:
+        print(f"⚠️ copy_rates_range failed for {symbol} shadow analysis: {e}")
+        return pd.DataFrame()
+    if rates is None or len(rates) == 0:
+        return pd.DataFrame()
+    df = pd.DataFrame(rates)
+    df['time'] = pd.to_datetime(df['time'], unit='s')
+    return df.sort_values('time').reset_index(drop=True)
+
+
+def _scan_window_for_shadow_engulf(candles, direction, sniper, sl_side_boundary, tp_side_boundary):
+    """
+    Scans one candle series for touch -> valid-zone engulf. The valid zone is symmetric:
+    [sl_side_boundary, tp_side_boundary] around sniper (sniper +/- 20% of risk). Once
+    touched, if a candle CLOSES beyond either boundary before a qualifying engulf appears,
+    the window ends there (abandon_side records which boundary: 'SL' or 'TP').
+    Returns a dict: touched, touch_time, entered, entry_price, entry_time,
+    abandon_side, abandon_time.
+    """
+    result = {
+        "touched": False, "touch_time": None,
+        "entered": False, "entry_price": None, "entry_time": None,
+        "abandon_side": None, "abandon_time": None,
+    }
+    if candles.empty:
+        return result
+
+    for i in range(len(candles)):
+        if not result["touched"]:
+            if direction == "BUY" and candles['low'].iloc[i] <= sniper:
+                result["touched"] = True
+                result["touch_time"] = candles['time'].iloc[i]
+            elif direction == "SELL" and candles['high'].iloc[i] >= sniper:
+                result["touched"] = True
+                result["touch_time"] = candles['time'].iloc[i]
+            continue
+
+        close_price = candles['close'].iloc[i]
+        if direction == "BUY":
+            if close_price < sl_side_boundary:
+                result["abandon_side"] = "SL"
+                result["abandon_time"] = candles['time'].iloc[i]
+                break
+            if close_price > tp_side_boundary:
+                result["abandon_side"] = "TP"
+                result["abandon_time"] = candles['time'].iloc[i]
+                break
+        else:  # SELL
+            if close_price > sl_side_boundary:
+                result["abandon_side"] = "SL"
+                result["abandon_time"] = candles['time'].iloc[i]
+                break
+            if close_price < tp_side_boundary:
+                result["abandon_side"] = "TP"
+                result["abandon_time"] = candles['time'].iloc[i]
+                break
+
+        if i >= 1 and detect_raw_body_engulf(candles, direction, i):
+            result["entered"] = True
+            result["entry_price"] = candles['close'].iloc[i]
+            result["entry_time"] = candles['time'].iloc[i]
+            break
+
+    return result
+
+
+def simulate_shadow_outcome_with_ticks(symbol, direction, sl, tp2, start_time, end_time):
+    """
+    Given a shadow entry has already happened at start_time, scans ticks forward to see
+    whether SL or TP2 (the same gating level used to score the real order's Won/Lost
+    Trade fields, so the comparison is apples-to-apples) is hit first.
+    Returns (outcome, hit_time) where outcome is 'WON', 'LOST', or 'NO_DATA'.
+    """
+    ticks_df = get_ticks_for_simulation(symbol, start_time, end_time)
+    if ticks_df.empty:
+        return 'NO_DATA', None
+
+    for _, tick in ticks_df.iterrows():
+        tick_time = tick['time']
+        bid = safe_float_conversion(tick.get('bid', 0))
+        ask = safe_float_conversion(tick.get('ask', 0))
+        if bid == 0 and ask == 0:
+            last_price = safe_float_conversion(tick.get('last', 0))
+            if last_price == 0:
+                continue
+            bid = ask = last_price
+
+        if direction == "BUY":
+            if bid >= tp2:
+                return 'WON', tick_time
+            if ask <= sl:
+                return 'LOST', tick_time
+        elif direction == "SELL":
+            if ask <= tp2:
+                return 'WON', tick_time
+            if bid >= sl:
+                return 'LOST', tick_time
+
+    return 'NO_DATA', None
+
+
+def analyze_shadow_engulf_pending_orders(pending_records):
+    """
+    Retroactively simulates the touch -> wait-for-engulf -> enter (or abandon) edge for
+    every historical PENDING order, and compares it against what the order actually did.
+    `pending_records` is the list of dicts returned by analyze_pending_orders_enhanced().
+    Returns a list of dicts (one per PENDING order) with the shadow simulation results.
+    """
+    print("🕯️ Running shadow-mode engulf analysis on historical pending orders...")
+    shadow_records = []
+
+    pending_only = [r for r in pending_records if r.get("Order Type") == "PENDING"]
+    total = len(pending_only)
+
+    for idx, rec in enumerate(pending_only):
+        symbol = rec["Symbol"]
+        direction = rec["Direction"]
+        sniper = rec["Entry Price"]
+        sl = rec["SL"]
+        tp2 = rec["TP2"]
+        signal_time = rec["Signal Time"]
+
+        if sniper is None or sl is None or tp2 is None or sniper == 0 or sl == 0:
+            continue
+
+        # risk = abs(entry_price - swing_point) originally; recovered here purely from
+        # sniper and sl since sniper - sl = 1.2*risk in both directions (from the fib
+        # multipliers: sniper = swing +/- 0.3*risk, sl = swing -/+ 0.9*risk).
+        risk = abs(sniper - sl) / 1.2
+        if risk <= 0:
+            continue
+
+        if direction == "BUY":
+            sl_side_boundary = sniper - (SHADOW_ZONE_RISK_FRACTION * risk)
+            tp_side_boundary = sniper + (SHADOW_ZONE_RISK_FRACTION * risk)
+        else:
+            sl_side_boundary = sniper + (SHADOW_ZONE_RISK_FRACTION * risk)
+            tp_side_boundary = sniper - (SHADOW_ZONE_RISK_FRACTION * risk)
+
+        # Window: from signal time to whenever the real order's analysis window ended
+        window_end = rec.get("Entry Time") or rec.get("SL Time") or rec.get("TP2 Time") or \
+            rec.get("First Touch Time") or datetime.now()
+        if pd.isna(window_end):
+            window_end = datetime.now()
+
+        # Primary pass: M3 across the full window
+        primary_candles = fetch_shadow_confirmation_candles(
+            symbol, signal_time, window_end, SHADOW_ENGULF_TIMEFRAME_PRIMARY)
+        scan = _scan_window_for_shadow_engulf(
+            primary_candles, direction, sniper, sl_side_boundary, tp_side_boundary)
+        used_timeframe = "M3" if scan["touched"] else None
+        has_any_data = not primary_candles.empty
+
+        # Fallback pass: M5, only if M3 didn't find a qualifying engulf. Restricted to the
+        # same window (touch -> wherever the window ended for the M3 pass).
+        if not scan["entered"] and SHADOW_ENGULF_TIMEFRAME_FALLBACK != SHADOW_ENGULF_TIMEFRAME_PRIMARY:
+            fallback_end = scan["abandon_time"] if scan["abandon_time"] else window_end
+            fallback_candles = fetch_shadow_confirmation_candles(
+                symbol, signal_time, fallback_end, SHADOW_ENGULF_TIMEFRAME_FALLBACK)
+            has_any_data = has_any_data or not fallback_candles.empty
+            fb_scan = _scan_window_for_shadow_engulf(
+                fallback_candles, direction, sniper, sl_side_boundary, tp_side_boundary)
+            if fb_scan["entered"]:
+                scan = fb_scan
+                used_timeframe = "M5"
+            elif not scan["touched"] and fb_scan["touched"]:
+                # M3 had no data / never registered touch, but M5 did
+                scan = fb_scan
+                used_timeframe = "M5"
+
+        if not has_any_data:
+            shadow_records.append({
+                "Symbol": symbol, "Timeframe": rec["Timeframe"], "Direction": direction,
+                "Signal Time": signal_time, "Shadow Touched": False,
+                "Shadow Entry Timeframe": None, "Shadow Entered": False,
+                "Shadow Abandon Side": None, "Shadow Abandon Time": None,
+                "Shadow Entry Price": None, "Shadow Entry Time": None,
+                "Shadow Outcome": "NO_DATA", "Shadow Outcome Time": None,
+                "Real Missed Opportunity": rec.get("Missed Opportunity"),
+                "Real Won Trade": rec.get("Won Trade"), "Real Lost Trade": rec.get("Lost Trade"),
+                "Real Entry Filled": rec.get("Entry Filled"),
+            })
+            continue
+
+        shadow_outcome = "NO_ENTRY"
+        shadow_outcome_time = None
+        if scan["entered"]:
+            outcome_end = window_end if window_end > scan["entry_time"] else scan["entry_time"] + timedelta(days=5)
+            shadow_outcome, shadow_outcome_time = simulate_shadow_outcome_with_ticks(
+                symbol, direction, sl, tp2, scan["entry_time"], outcome_end)
+
+        shadow_records.append({
+            "Symbol": symbol,
+            "Timeframe": rec["Timeframe"],
+            "Direction": direction,
+            "Signal Time": signal_time,
+            "Shadow Touched": scan["touched"],
+            "Shadow Entry Timeframe": used_timeframe if scan["entered"] else None,
+            "Shadow Entered": scan["entered"],
+            "Shadow Abandon Side": scan["abandon_side"],
+            "Shadow Abandon Time": scan["abandon_time"],
+            "Shadow Entry Price": scan["entry_price"],
+            "Shadow Entry Time": scan["entry_time"],
+            "Shadow Outcome": shadow_outcome,
+            "Shadow Outcome Time": shadow_outcome_time,
+            "Real Missed Opportunity": rec.get("Missed Opportunity"),
+            "Real Won Trade": rec.get("Won Trade"),
+            "Real Lost Trade": rec.get("Lost Trade"),
+            "Real Entry Filled": rec.get("Entry Filled"),
+        })
+
+        if (idx + 1) % 10 == 0:
+            print(f"  Shadow-analyzed {idx + 1}/{total} pending orders...")
+
+    print(f"Shadow-mode engulf analysis complete: {len(shadow_records)} pending orders processed")
+    return shadow_records
+
+
+def build_shadow_vs_actual_comparison(shadow_df):
+    """
+    Classifies each shadow-analyzed order into a comparison category against what the
+    real resting order actually did, and returns the per-trade comparison plus an
+    aggregated win-rate comparison (real vs shadow) by Symbol and by Symbol+Timeframe.
+    """
+    if shadow_df.empty:
+        return shadow_df, pd.DataFrame(), pd.DataFrame()
+
+    def classify(row):
+        real_won = bool(row.get("Real Won Trade"))
+        real_lost = bool(row.get("Real Lost Trade"))
+        shadow_entered = bool(row.get("Shadow Entered"))
+        shadow_won = row.get("Shadow Outcome") == "WON"
+        shadow_lost = row.get("Shadow Outcome") == "LOST"
+
+        if not shadow_entered:
+            if real_lost:
+                return "Dodged Loss"
+            elif real_won:
+                return "Missed Win"
+            else:
+                return "No Real Fill / No Shadow Entry"
+        else:
+            if real_won and shadow_won:
+                return "Agree - Both Won"
+            elif real_lost and shadow_lost:
+                return "Agree - Both Lost"
+            elif real_won and shadow_lost:
+                return "Disagree - Real Won, Shadow Lost"
+            elif real_lost and shadow_won:
+                return "Disagree - Real Lost, Shadow Won"
+            else:
+                return "Other / Incomplete Data"
+
+    shadow_df = shadow_df.copy()
+    shadow_df["Comparison"] = shadow_df.apply(classify, axis=1)
+
+    def win_rate_summary(group_cols):
+        rows = []
+        for keys, group in shadow_df.groupby(group_cols):
+            total = len(group)
+            real_wins = group["Real Won Trade"].fillna(False).astype(bool).sum()
+            real_losses = group["Real Lost Trade"].fillna(False).astype(bool).sum()
+            real_decided = real_wins + real_losses
+            real_wr = (real_wins / real_decided * 100) if real_decided > 0 else None
+
+            shadow_entered = group["Shadow Entered"].fillna(False).astype(bool)
+            shadow_wins = (group["Shadow Outcome"] == "WON").sum()
+            shadow_losses = (group["Shadow Outcome"] == "LOST").sum()
+            shadow_decided = shadow_wins + shadow_losses
+            shadow_wr = (shadow_wins / shadow_decided * 100) if shadow_decided > 0 else None
+
+            row = {}
+            if isinstance(keys, tuple):
+                for col, val in zip(group_cols, keys):
+                    row[col] = val
+            else:
+                row[group_cols[0]] = keys
+            row.update({
+                "Total Orders": total,
+                "Real Wins": int(real_wins), "Real Losses": int(real_losses),
+                "Real Win Rate %": round(real_wr, 1) if real_wr is not None else None,
+                "Shadow Entries": int(shadow_entered.sum()),
+                "Shadow Wins": int(shadow_wins), "Shadow Losses": int(shadow_losses),
+                "Shadow Win Rate %": round(shadow_wr, 1) if shadow_wr is not None else None,
+                "Dodged Losses": int((group["Comparison"] == "Dodged Loss").sum()),
+                "Missed Wins": int((group["Comparison"] == "Missed Win").sum()),
+            })
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    by_symbol = win_rate_summary(["Symbol"])
+    by_symbol_tf = win_rate_summary(["Symbol", "Timeframe"])
+
+    return shadow_df, by_symbol, by_symbol_tf
+
+
+def save_shadow_engulf_excel_report(shadow_df, by_symbol, by_symbol_tf):
+    """Writes the per-trade shadow-vs-actual comparison and the aggregated win-rate
+    comparison (real vs shadow) to their own workbook."""
+    if shadow_df.empty:
+        print("No shadow-mode engulf data to save")
+        return
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = os.path.join(OUTPUT_FOLDER, f"Shadow_Engulf_Analysis_{timestamp}.xlsx")
+
+    try:
+        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+            shadow_df.to_excel(writer, sheet_name="Shadow_vs_Actual", index=False)
+            if not by_symbol.empty:
+                by_symbol.to_excel(writer, sheet_name="WinRate_By_Symbol", index=False)
+            if not by_symbol_tf.empty:
+                by_symbol_tf.to_excel(writer, sheet_name="WinRate_By_Symbol_TF", index=False)
+
+            header_font = Font(bold=True, color="FFFFFF", size=12)
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
+                                  top=Side(style='thin'), bottom=Side(style='thin'))
+
+            for sheet_name in writer.sheets:
+                ws = writer.sheets[sheet_name]
+                for cell in ws[1]:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                for col in ws.columns:
+                    max_length = 0
+                    column = col[0].column_letter
+                    for cell in col:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except Exception:
+                            pass
+                    ws.column_dimensions[column].width = min(max_length + 2, 50)
+                for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+                    for cell in row:
+                        cell.border = thin_border
+
+        print(f"Shadow-mode engulf analysis report saved: {filename}")
+    except Exception as e:
+        print(f"Error saving shadow-mode Excel report: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def run_shadow_engulf_analysis():
+    """Orchestrates the shadow-mode engulf edge analysis: re-derives the pending order
+    records, simulates the touch->engulf->enter/abandon logic, compares it against what
+    the real resting orders actually did, and saves results to their own workbook."""
+    pending_data = analyze_pending_orders_enhanced()
+    if not pending_data:
+        print("⚠️ No pending order data available for shadow-mode analysis")
+        return
+    shadow_records = analyze_shadow_engulf_pending_orders(pending_data)
+    if not shadow_records:
+        print("⚠️ No shadow-mode results generated")
+        return
+    shadow_df = pd.DataFrame(shadow_records)
+    shadow_df, by_symbol, by_symbol_tf = build_shadow_vs_actual_comparison(shadow_df)
+    save_shadow_engulf_excel_report(shadow_df, by_symbol, by_symbol_tf)
 
 # ======================================================================================
 # === CANDLE-CONTEXT ANALYSIS ===
@@ -1034,7 +1472,7 @@ def generate_comprehensive_report(df: pd.DataFrame):
         missed_by_symbol_tf = missed_opps.groupby(['Symbol', 'Timeframe']).size().reset_index(name='Missed Count')
         missed_by_symbol_tf = missed_by_symbol_tf.sort_values('Missed Count', ascending=False)
         
-        print(f"📈 Missed Opportunities (TP1 hit but no entry): {len(missed_opps)}")
+        print(f"📈 Missed Opportunities (TP2 hit but no entry): {len(missed_opps)}")
         if not missed_opps.empty:
             print("\nTop missed opportunities:")
             for _, row in missed_by_symbol_tf.head(10).iterrows():
@@ -1054,7 +1492,7 @@ def generate_comprehensive_report(df: pd.DataFrame):
             print(f"   {row['Symbol']} - {row['Timeframe']}: {row['Execution_Rate_%']}% ({row['Executed_Orders']:.0f}/{row['Total_Orders']:.0f})")
         
         # Add to report_lines
-        report_lines.append(f"📈 Missed Opportunities (TP1 hit but no entry): {len(missed_opps)}")
+        report_lines.append(f"📈 Missed Opportunities (TP2 hit but no entry): {len(missed_opps)}")
         if not missed_opps.empty:
             report_lines.append("")
             report_lines.append("Top missed opportunities:")
@@ -1150,7 +1588,7 @@ def generate_comprehensive_report(df: pd.DataFrame):
             print("🔔 CONSIDER SWITCHING TO INSTANT ORDERS:")
             report_lines.append("🔔 CONSIDER SWITCHING TO INSTANT ORDERS:")
             for (symbol, timeframe), count in high_missed_grouped.items():
-                line = f"   📍 {symbol} on {timeframe}: {count} missed TP1 hits"
+                line = f"   📍 {symbol} on {timeframe}: {count} missed TP2 hits"
                 print(line)
                 report_lines.append(line)
     
@@ -1236,9 +1674,9 @@ def create_enhanced_visualizations(df: pd.DataFrame):
                           color=[COLORS['buy'] if d == 'BUY' else COLORS['sell'] for d in top15['Direction']],
                           edgecolor='white', linewidth=1.5, alpha=0.92)
 
-            ax.set_title('TOP 15 MISSED OPPORTUNITIES\n(TP1 Hit Before Entry)', 
+            ax.set_title('TOP 15 MISSED OPPORTUNITIES\n(TP2 Hit Before Entry)', 
                         fontsize=24, fontweight='bold', pad=40)
-            ax.set_xlabel('Number of Times TP1 Was Hit Without Entry', fontsize=13, fontweight='bold')
+            ax.set_xlabel('Number of Times TP2 Was Hit Without Entry', fontsize=13, fontweight='bold')
 
             for bar, count in zip(bars, top15['Missed_Count']):
                 ax.text(count + 0.3, bar.get_y() + bar.get_height()/2,
@@ -1504,6 +1942,7 @@ def main():
     create_enhanced_visualizations(df)
     save_comprehensive_excel_report(df)
     run_candle_context_analysis(df)
+    run_shadow_engulf_analysis()
     
     mt5.shutdown()
     print(f"\n✅ Comprehensive analysis completed successfully!")
