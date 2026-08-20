@@ -1283,6 +1283,9 @@ def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
             "type_filling": mt5.ORDER_FILLING_FOK,
         }
     order = mt5.order_send(request1)
+    if order is None:
+        print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+        return
     if order.retcode == mt5.TRADE_RETCODE_DONE:
         plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
         send_telegram_image(plot_filename,f"📥 <b>Exness Pending Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {sniper:.4f}\nSL: {sl:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {levels[(symbol,timeframe)]["tp2"]:.4f}\nTP3: {tp:.4f}")
@@ -1333,6 +1336,9 @@ def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
         "type_filling": mt5.ORDER_FILLING_FOK,
     }
     order = mt5.order_send(request)
+    if order is None:
+        print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+        return
     if order.retcode == mt5.TRADE_RETCODE_DONE:
         plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
         send_telegram_image(plot_filename,f"🚀 <b>Exness Market Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {entry_price:.4f}\nSL: {sl1:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {levels[(symbol,timeframe)]["tp2"]:.4f}\nTP3: {tp:.4f}")
@@ -1415,7 +1421,10 @@ def close_pending(symbol):
                 }
             result = mt5.order_send(request)
                 
-            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            if result is None:
+                print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                continue
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
                 send_telegram_message(f"Delete Exness pending {direction} order for {symbol} on {timeframe_to_str(timeframe)}.")
                 print(f"✅ Deleted pending order {order.ticket} for {symbol}.")
                 if (symbol, timeframe) in active_channels:
@@ -1507,6 +1516,9 @@ def check_tp1_and_manage_trades(symbol, tp1,timeframe):
                         "type_filling": mt5.ORDER_FILLING_FOK,
                     }
                     close_result = mt5.order_send(close_request)
+                    if close_result is None:
+                        print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                        continue
                     if close_result.retcode == mt5.TRADE_RETCODE_DONE:
                         send_telegram_message(f"TP1 hit. Apply breakeven and close ~1/3 of Exness {direction} positions for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                         print(f"✅ Closed ~1/3 of position {position.ticket} for {symbol} at TP1.")
@@ -1588,6 +1600,9 @@ def check_tp2_and_manage_trades(symbol, tp2, timeframe):
                     "type_filling": mt5.ORDER_FILLING_FOK,
                 }
                 close_result = mt5.order_send(close_request)
+                if close_result is None:
+                    print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                    continue
                 if close_result.retcode == mt5.TRADE_RETCODE_DONE:
                     send_telegram_message(f"TP2 hit. Closed further portion of Exness {direction} position for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                     print(f"✅ Closed further portion of position {position.ticket} for {symbol} at TP2.")
@@ -1765,6 +1780,9 @@ def handle_engulfing_patterns():
                                     "type_filling": mt5.ORDER_FILLING_FOK,
                                 }
                                 result = mt5.order_send(close_request)
+                                if result is None:
+                                    print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                                    continue
                                 if result.retcode == mt5.TRADE_RETCODE_DONE:
                                     print(f"Closed half due to engulfing {symbol}")
                                     send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { L['direction']} on {timeframe_to_str(timeframe)}")
@@ -1791,6 +1809,9 @@ def handle_engulfing_patterns():
                                     "type_filling": mt5.ORDER_FILLING_FOK,
                                 }
                                 result = mt5.order_send(close_request)
+                                if result is None:
+                                    print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                                    continue
                                 if result.retcode == mt5.TRADE_RETCODE_DONE:
                                     print(f"Closed half due to engulfing {symbol}")
                                     send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { L['direction']} on {timeframe_to_str(timeframe)}")
@@ -1811,6 +1832,9 @@ def handle_engulfing_patterns():
                                     "type_filling": mt5.ORDER_FILLING_FOK,
                                 }
                                 result = mt5.order_send(close_request)
+                                if result is None:
+                                    print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                                    continue
                                 if result.retcode == mt5.TRADE_RETCODE_DONE:
                                     print(f"Closed due to too many engulfing {symbol}")
                                     send_telegram_message(f"Too many  engulfing, closed trade {symbol} { L['direction']} on {timeframe_to_str(timeframe)}")
@@ -1865,6 +1889,9 @@ def handle_engulfing_patterns():
                                 "type_filling": mt5.ORDER_FILLING_FOK,
                             }
                             result = mt5.order_send(close_request)
+                            if result is None:
+                                print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                                continue
                             if result.retcode == mt5.TRADE_RETCODE_DONE:
                                 print(f"Closed half due to engulfing {symbol}")
                                 send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { direction} on {timeframe_to_str(timeframe)}")
@@ -1891,6 +1918,9 @@ def handle_engulfing_patterns():
                                 "type_filling": mt5.ORDER_FILLING_FOK,
                             }
                             result = mt5.order_send(close_request)
+                            if result is None:
+                                print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                                continue
                             if result.retcode == mt5.TRADE_RETCODE_DONE:
                                 print(f"Closed half due to engulfing {symbol}")
                                 send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { direction} on {timeframe_to_str(timeframe)}")
@@ -1911,6 +1941,9 @@ def handle_engulfing_patterns():
                                 "type_filling": mt5.ORDER_FILLING_FOK,
                             }
                             result = mt5.order_send(close_request)
+                            if result is None:
+                                print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                                continue
                             if result.retcode == mt5.TRADE_RETCODE_DONE:
                                 print(f"Closed due to too many engulfing {symbol}")
                                 send_telegram_message(f"Too many  engulfing, closed trade {symbol} { direction} on {timeframe_to_str(timeframe)}")
@@ -1997,6 +2030,9 @@ def check_engulfing_before_tp2_for_breakeven_trades():
                 }
                 
                 result = mt5.order_send(request)
+                if result is None:
+                    print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                    continue
                 if result.retcode == mt5.TRADE_RETCODE_DONE:
                     print(f"✅ Tightened SL for breakeven trade {symbol}: New SL={new_sl:.5f}")
                     send_telegram_message(f"✅ Tightened SL for {symbol} {trade_direction} on {timeframe_to_str(timeframe)} due to pre-TP2 engulfing : New SL={new_sl:.5f}")
@@ -2238,7 +2274,10 @@ def close_all_pending_orders(reason=""):
             "order": order.ticket,
         }
         result = mt5.order_send(request)
-        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+        if result is None:
+            print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+            continue
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
             print(f"✅ Closed pending order {order.ticket} for {order.symbol} ({reason})")
             key = (order.symbol, order.magic)
             if key in active_channels:

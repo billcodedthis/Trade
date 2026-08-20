@@ -836,6 +836,9 @@ def pending(symbol, direction, entry_price, sl, tp,sniper,timeframe):
             "type_filling": mt5.ORDER_FILLING_FOK,
         }
     order = mt5.order_send(request1)
+    if order is None:
+        print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+        return
     if order.retcode == mt5.TRADE_RETCODE_DONE:
         plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
         send_telegram_image(plot_filename,f"📥 <b>Deriv Pending Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {sniper:.4f}\nSL: {sl:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {levels[(symbol,timeframe)]["tp2"]:.4f}\nTP3: {tp:.4f}")
@@ -868,6 +871,9 @@ def place_trade(symbol, direction, entry_price, sl1, tp,timeframe):
         "type_filling": mt5.ORDER_FILLING_FOK,
     }
     order = mt5.order_send(request)
+    if order is None:
+        print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+        return
     if order.retcode == mt5.TRADE_RETCODE_DONE:
         plot_filename = os.path.join(PLOTS_FOLDER, f"{symbol}_{timeframe_to_str(timeframe)}_channel.png")
         send_telegram_image(plot_filename,f"🚀 <b>Deriv Market Trade</b>\nSymbol: {symbol}\nDirection: {direction}\nEntry: {entry_price:.4f}\nSL: {sl1:.4f}\nTP1: {levels[(symbol,timeframe)]["tp1"]:.4f}\nTP2: {levels[(symbol,timeframe)]["tp2"]:.4f}\nTP3: {tp:.4f}")
@@ -914,7 +920,10 @@ def close_pending(symbol):
                 }
             result = mt5.order_send(request)
                 
-            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            if result is None:
+                print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                continue
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
                 send_telegram_message(f"Delete deriv pending order for {symbol}.")
                 print(f"✅ Deleted pending order {order.ticket} for {symbol}.")
             else:
@@ -971,6 +980,9 @@ def check_tp1_and_manage_trades(symbol, tp1, timeframe):
                     "type_filling": mt5.ORDER_FILLING_FOK,
                 }
                 close_result = mt5.order_send(close_request)
+                if close_result is None:
+                    print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                    continue
                 if close_result.retcode == mt5.TRADE_RETCODE_DONE:
                     send_telegram_message(f"TP1 hit. Apply breakeven and close ~1/3 of deriv positions for {symbol} trade.✅")
                     print(f"✅ Closed ~1/3 of position {position.ticket} for {symbol} at TP1.")
@@ -1026,6 +1038,9 @@ def check_tp2_and_manage_trades(symbol, tp2, timeframe):
                     "type_filling": mt5.ORDER_FILLING_FOK,
                 }
                 close_result = mt5.order_send(close_request)
+                if close_result is None:
+                    print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
+                    continue
                 if close_result.retcode == mt5.TRADE_RETCODE_DONE:
                     send_telegram_message(f"TP2 hit. Closed further portion of deriv position for {symbol} trade.✅")
                     print(f"✅ Closed further portion of position {position.ticket} for {symbol} at TP2.")
