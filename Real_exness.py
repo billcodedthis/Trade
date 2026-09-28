@@ -1443,6 +1443,24 @@ def close_pending(symbol):
 TP1_REMAINING_FRACTION = 2 / 3
 TP2_REMAINING_FRACTION = (2 / 3) * (2 / 3)
 
+# Tickets whose TP2 cut has already been executed. Volume thresholds can't be used as the
+# "already cut" test on their own: cut_lot is rounded to the lot step, so the remaining
+# volume often stays slightly ABOVE initial*4/9 and the cut would repeat every poll.
+# Partial-close deal COUNTS can't be used either: engulfing cuts are indistinguishable
+# from TP cuts, so they would be miscounted as TP2.
+tp2_cut_done = set()
+TP2_CUT_COMMENT = "TP2cut"   # deal comment only; position.comment (TP levels) is untouched
+
+def _tp2_already_cut(position, deals, initial_volume):
+    if position.ticket in tp2_cut_done:
+        return True
+    # Best-effort restart recovery: a partial-close deal tagged by the TP2 cut below.
+    if any(d.entry == mt5.DEAL_ENTRY_OUT and TP2_CUT_COMMENT in (d.comment or "") for d in deals):
+        tp2_cut_done.add(position.ticket)
+        return True
+    # Already reduced to/below the TP2 target (e.g. by engulfing cuts): nothing left to cut.
+    return position.volume <= (initial_volume * TP2_REMAINING_FRACTION) + 1e-9
+
 def check_tp1_and_manage_trades(symbol, tp1,timeframe):
     """Fires at (new) TP1: apply breakeven and close ~1/3 of the current position."""
     if isinstance(tp1,str):
@@ -1581,7 +1599,7 @@ def check_tp2_and_manage_trades(symbol, tp2, timeframe):
                     modify_trade_to_breakeven(symbol, position.ticket, entry_price)
                 if position.volume == get_min_lot_size(symbol):
                     continue
-                if position.volume <= (initial_volume * TP2_REMAINING_FRACTION) + 1e-9:
+                if _tp2_already_cut(position, deals, initial_volume):
                     print(f"✅ Position {position.ticket} for {symbol} already cut at TP2.")
                     continue
                 t = decimal_places(get_min_lot_size(symbol))
@@ -1593,7 +1611,7 @@ def check_tp2_and_manage_trades(symbol, tp2, timeframe):
                     "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
                     "position": position.ticket,
                     "price": current_price,
-                    "comment": position.comment,
+                    "comment": TP2_CUT_COMMENT,
                     "deviation": 10,
                     "magic": position.magic,
                     "type_time": mt5.ORDER_TIME_GTC,
@@ -1604,9 +1622,11 @@ def check_tp2_and_manage_trades(symbol, tp2, timeframe):
                     print(f"❌ order_send returned None (no response from server): {mt5.last_error()}")
                     continue
                 if close_result.retcode == mt5.TRADE_RETCODE_DONE:
+                    tp2_cut_done.add(position.ticket)
                     send_telegram_message(f"TP2 hit. Closed further portion of Exness {direction} position for {symbol} on {timeframe_to_str(timeframe)} trade.✅")
                     print(f"✅ Closed further portion of position {position.ticket} for {symbol} at TP2.")
                 elif close_result.comment == "Invalid volume":
+                    tp2_cut_done.add(position.ticket)
                     print(f"{symbol} cannot be cut further at TP2 (volume too small).")
                 else:
                     print(f"❌ Failed to close portion of {symbol} at TP2: {close_result.comment}")
