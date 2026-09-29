@@ -88,6 +88,11 @@ def is_time_restricted(symbol):
                 symbol in [XAUUSD] ):
                 print(f"⛔ Weekend restriction: {symbol} blocked from {now.strftime('%A %H:%M')} (Friday after {WEEKEND_RESTRICTION_START}:00)")
                 return True
+    elif now.weekday() == 5:  # Saturday - not covered by the original Friday/Sunday/Monday branches
+        if (symbol in Forex_Major + Forex_Minor or 
+            symbol in [XAUUSD] ):
+            print(f"⛔ Weekend restriction: {symbol} blocked until {WEEKEND_RESTRICTION_END}:00 Monday")
+            return True
     elif now.weekday() == 6:  # Sunday
         if (symbol in Forex_Major + Forex_Minor or 
             symbol in [XAUUSD] ):
@@ -1154,8 +1159,14 @@ def apply_fibonacci_levels(symbol, entry_idx, df,timeframe):
     return levels[(symbol,timeframe)]
 
 def format_tp_comment(tp1, tp2):
-    """Encode tp1 and tp2 into the compact pipe-delimited order/position comment."""
-    return f"{tp1}|{tp2}"
+    """Encode tp1 and tp2 into the compact pipe-delimited order/position comment.
+    MT5 rejects comments longer than 31 characters ('Invalid "comment" argument'), and tp1/tp2
+    are unrounded floats (e.g. 5136.2300000000005), so use the highest precision that fits."""
+    for digits in range(10, -1, -1):
+        comment = f"{round(float(tp1), digits)}|{round(float(tp2), digits)}"
+        if len(comment) <= 31:
+            return comment
+    return comment[:31]
 
 def extract_tp_levels_from_comment(comment):
     """Decode the pipe-delimited comment back into (tp1, tp2). Returns (None, None) on failure."""
@@ -1723,8 +1734,12 @@ def update_pending_order_status():
                             print(f"Pending order for {symbol} on {timeframe_to_str(timeframe)} triggered at {levels[(symbol, timeframe)]['entry_time']}")
                             break
 
-def detect_opposite_engulfing(df, direction, symbol, timeframe):
-    entry_price = levels.get((symbol, timeframe), {}).get('entry')
+def detect_opposite_engulfing(df, direction, symbol, timeframe, entry_price=None):
+    """entry_price: pass explicitly for a position with no `levels` entry (e.g. after a
+    restart) - falling back to levels[...]['entry'] only, which is what this did before,
+    meant that path could never find an entry price and this always returned None."""
+    if entry_price is None:
+        entry_price = levels.get((symbol, timeframe), {}).get('entry')
     if entry_price is None:
         return None
     for i in range(4, len(df) - 1):  # Need confirmation candle
@@ -1880,7 +1895,7 @@ def handle_engulfing_patterns():
             recent = candles[candles['time'] > entry_time].reset_index(drop=True)
             if len(recent) < 5: continue
             direction = "BUY" if pos.type == mt5.ORDER_TYPE_BUY else "SELL"
-            eng_i = detect_opposite_engulfing(recent, direction, symbol, timeframe)
+            eng_i = detect_opposite_engulfing(recent, direction, symbol, timeframe, entry_price=pos.price_open)
             if eng_i is not None:
                 eng_time = recent['time'].iloc[eng_i]
                 if 'last_engulf_time' not in L or L['last_engulf_time'] is None or eng_time > L['last_engulf_time']:
