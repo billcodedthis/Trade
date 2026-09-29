@@ -12,6 +12,7 @@ import signal
 import sys
 import requests
 import re
+from decimal import Decimal, ROUND_DOWN
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -1313,6 +1314,21 @@ def get_lot_step(symbol):
     else:
         return None
 
+def floor_to_lot_step(volume, lot_step, min_lot):
+    """Round volume down to the nearest lot_step using exact decimal arithmetic.
+    Plain float floor-division (volume divided then multiplied back by lot_step) is
+    unsafe here: lot steps like 0.1 aren't exactly representable in binary floating
+    point, so e.g. 1.0 / 0.1 can evaluate to 9.999999999999998 instead of 10.0, silently
+    turning a 1.00 lot into 0.90 (and similarly for many other volume/step combinations).
+    Decimal(str(x)) recovers the exact value MT5 reported (str() gives the decimal
+    MT5/Python meant, not the binary approximation), so dividing and truncating in
+    Decimal always finds the correct step."""
+    step_dec = Decimal(str(lot_step))
+    vol_dec = Decimal(str(volume))
+    steps = (vol_dec / step_dec).to_integral_value(rounding=ROUND_DOWN)
+    floored = float(steps * step_dec)
+    return max(floored, min_lot)
+
 def adjust_lot_for_risk(symbol, direction, entry_price, sl, initial_volume):
     """Adjust lot size to ensure risk <= 5% of balance."""
     balance = mt5.account_info().balance
@@ -1342,18 +1358,18 @@ def adjust_lot_for_risk(symbol, direction, entry_price, sl, initial_volume):
 
         if 2 <=risk_pct <= 5:
             # Round down to nearest step
-            volume = (volume // lot_step) * lot_step
+            volume = floor_to_lot_step(volume, lot_step, min_lot)
             if volume < min_lot:
                 volume = min_lot
             return volume
         
         elif risk_pct < 2:
             volume *= 2
-            volume = max((volume // lot_step) * lot_step, min_lot)
+            volume = max(floor_to_lot_step(volume, lot_step, min_lot), min_lot)
 
         elif risk_pct >5:
             volume /= 2
-            volume = max((volume // lot_step) * lot_step, min_lot)
+            volume = max(floor_to_lot_step(volume, lot_step, min_lot), min_lot)
 
     if volume == min_lot:
         profit = mt5.order_calc_profit(order_type, symbol, volume, entry_price, sl)
@@ -1367,7 +1383,7 @@ def adjust_lot_for_risk(symbol, direction, entry_price, sl, initial_volume):
 
         if 2 <=risk_pct <= 5:
             # Round down to nearest step
-            volume = (volume // lot_step) * lot_step
+            volume = floor_to_lot_step(volume, lot_step, min_lot)
             if volume < min_lot:
                 volume = min_lot
             return volume
