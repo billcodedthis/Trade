@@ -2041,6 +2041,10 @@ def detect_opposite_engulfing(df, direction, symbol, timeframe, entry_price=None
             if max(df['high'].iloc[i-3:i]) <= entry_price: continue
             # Confirmed by next candle closing lower
             if df['close'].iloc[i+1] >= df['close'].iloc[i]: continue
+            # The confirmation candle itself must still be above entry - otherwise the
+            # "pattern" only confirms once the position is already at a loss, which isn't
+            # something a protective cut should be reacting to.
+            if df['close'].iloc[i+1] <= entry_price: continue
             return i
         elif direction == "SELL":  # Bullish engulfing after 3 bears
             bears = all(df['close'].iloc[j] < df['open'].iloc[j] for j in range(i-3, i))
@@ -2054,6 +2058,8 @@ def detect_opposite_engulfing(df, direction, symbol, timeframe, entry_price=None
             if min(df['low'].iloc[i-3:i]) >= entry_price: continue
             # Confirmed by next candle closing higher
             if df['close'].iloc[i+1] <= df['close'].iloc[i]: continue
+            # Same guard as BUY above, mirrored.
+            if df['close'].iloc[i+1] >= entry_price: continue
             return i
     return None
 
@@ -2073,19 +2079,28 @@ def handle_engulfing_patterns():
         if eng_i is not None:
             eng_time = recent['time'].iloc[eng_i]
             if 'last_engulf_time' not in L or L['last_engulf_time'] is None or eng_time > L['last_engulf_time']:
-                L['last_engulf_time'] = eng_time
-                L['engulf_count'] += 1
-                print(f"Updated engulf_count to {L['engulf_count']} for {symbol}")
                 positions = mt5.positions_get(symbol=symbol)
                 for pos in positions:
                     if pos.magic == timeframe:
+                        # The pattern was confirmed on a past candle; price may have moved further
+                        # since then, and the close below sends at the CURRENT market price. Only
+                        # cut if the position is still favorable now - otherwise this would lock in
+                        # a loss instead of protecting a profit. Leave the signal unhandled so it is
+                        # re-checked (and can still fire) on a later poll if price recovers.
+                        current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
+                        still_favorable = (current_price > pos.price_open) if pos.type == 0 else (current_price < pos.price_open)
+                        if not still_favorable:
+                            print(f"⚠️ Engulfing signal for {symbol} skipped - price ({current_price}) already back at/past entry ({pos.price_open}); will re-check next poll")
+                            continue
+                        L['last_engulf_time'] = eng_time
+                        L['engulf_count'] += 1
+                        print(f"Updated engulf_count to {L['engulf_count']} for {symbol}")
                         count = L['engulf_count']
                         min_lot = get_min_lot_size(symbol)
                         if count == 1:
                             if pos.volume > min_lot:
                                 t = decimal_places(get_min_lot_size(symbol))
                                 half = round(pos.volume-(pos.volume / 1.5), t)
-                                current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
                                     "action": mt5.TRADE_ACTION_DEAL,
@@ -2114,7 +2129,6 @@ def handle_engulfing_patterns():
                             if pos.volume > min_lot:
                                 t = decimal_places(get_min_lot_size(symbol))
                                 half = round(pos.volume-(pos.volume / 1.5), t)
-                                current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
                                     "action": mt5.TRADE_ACTION_DEAL,
@@ -2137,7 +2151,6 @@ def handle_engulfing_patterns():
                                     print(f"Closed half due to engulfing {symbol}")
                                     send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { L['direction']} on {timeframe_to_str(timeframe)}")
                             elif pos.volume == min_lot:
-                                current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                                 close_type = 1 if pos.type == 0 else 0
                                 close_request = {
                                     "action": mt5.TRADE_ACTION_DEAL,
@@ -2185,6 +2198,12 @@ def handle_engulfing_patterns():
             if eng_i is not None:
                 eng_time = recent['time'].iloc[eng_i]
                 if 'last_engulf_time' not in L or L['last_engulf_time'] is None or eng_time > L['last_engulf_time']:
+                    # Same still-in-profit guard as above - see the comment there.
+                    current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
+                    still_favorable = (current_price > pos.price_open) if pos.type == 0 else (current_price < pos.price_open)
+                    if not still_favorable:
+                        print(f"⚠️ Engulfing signal for {symbol} skipped - price ({current_price}) already back at/past entry ({pos.price_open}); will re-check next poll")
+                        continue
                     L['last_engulf_time'] = eng_time
                     L['engulf_count'] += 1
                     print(f"Updated engulf_count to {L['engulf_count']} for {symbol}")
@@ -2194,7 +2213,6 @@ def handle_engulfing_patterns():
                         if pos.volume > min_lot:
                             t = decimal_places(get_min_lot_size(symbol))
                             half = round(pos.volume-(pos.volume / 1.5), t)
-                            current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {
                                 "action": mt5.TRADE_ACTION_DEAL,
@@ -2223,7 +2241,6 @@ def handle_engulfing_patterns():
                         if pos.volume > min_lot:
                             t = decimal_places(get_min_lot_size(symbol))
                             half = round(pos.volume-(pos.volume / 1.5), t)
-                            current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {
                                 "action": mt5.TRADE_ACTION_DEAL,
@@ -2246,7 +2263,6 @@ def handle_engulfing_patterns():
                                 print(f"Closed half due to engulfing {symbol}")
                                 send_telegram_message(f"Engulfing detected, closed half and breakeven {symbol} { direction} on {timeframe_to_str(timeframe)}")
                         elif pos.volume == min_lot:
-                            current_price = mt5.symbol_info_tick(symbol).bid if pos.type == 1 else mt5.symbol_info_tick(symbol).ask
                             close_type = 1 if pos.type == 0 else 0
                             close_request = {
                                 "action": mt5.TRADE_ACTION_DEAL,
